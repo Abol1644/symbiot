@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: symbiot
+Version: 0.1.0
+Requires-Python: >=3.12
+Requires-Dist: langgraph
+Requires-Dist: langchain
+Requires-Dist: langchain-openai
+Requires-Dist: langchain-ollama
+Requires-Dist: langsmith
+Requires-Dist: pydantic-settings
+Requires-Dist: docker
+Requires-Dist: langgraph-checkpoint-sqlite>=3.1.1

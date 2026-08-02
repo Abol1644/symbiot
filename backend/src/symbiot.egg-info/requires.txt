@@ -1,0 +1,8 @@
+langgraph
+langchain
+langchain-openai
+langchain-ollama
+langsmith
+pydantic-settings
+docker
+langgraph-checkpoint-sqlite>=3.1.1
