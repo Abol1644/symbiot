@@ -1,0 +1,24 @@
+[project]
+name = "symbiot"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph",
+    "langchain",
+    "langchain-openai",
+    "langchain-ollama",
+    "langsmith",
+    "pydantic-settings",
+    "docker",
+    "langgraph-checkpoint-sqlite>=3.1.1",
+]
+
+[dependency-groups]
+dev = ["langgraph-cli[inmem]", "pytest"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

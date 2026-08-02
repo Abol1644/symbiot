@@ -1,104 +1,162 @@
-# Symbiot — Programmer Loop Agent
+# symbiot
 
-A closed-loop, multi-agent system that turns a locked-format `PROJECT.md` into working, tested, deployed software with minimal human intervention.
-
-## How it works
-
-Four agents form a supervisor-free cycle orchestrated by LangGraph's conditional edges:
+Multi-agent loop that turns a PROJECT.md spec into a tested, deployed project — fully autonomous, sandboxed, with human-in-the-loop gates and live streaming to a React visualizer.
 
 ```
-Intake (Base) ──> Planner ──> Programmer ──> Tester
-                                              │
-                    ┌─────────────────────────┤
-                    │ passed                   │ failed
-                    ▼                          ▼
-             More milestones?            attempts left?
-             ├─ yes ──> Planner           ├─ yes ──> Planner (debug mode)
-             └─ no ──> Done               └─ no ──> Human review (interrupt)
+PROJECT.md -> validator -> base -> planner -> programmer -> tester
+                                   ^         |              |
+                                   |    +----+              |
+                                   |    |retry       pass   |
+                                   |    v              v    |
+                                   +- escalation   advance  |
+                                        |              |    |
+                                     abort       +----+    |
+                                        |         |next     |
+                                        v         v         |
+                                     cleanup <- planner ----
+                                        ^
+                                fail/budget exceeded
+                                        |
+                                 +------+
+                                 |      done
+                                 v
+                            deploy_gate
+                                 |
+                         +-------+-------+
+                         | approve       | skip
+                         v               v
+                      deployer       cleanup -> END
+                         |               ^
+                         v               |
+                      cleanup -----------+
+
 ```
 
-| Agent | Role |
-|---|---|
-| **Base / Intake** | Parses `PROJECT.md` into a structured spec: scope, milestones, definition of "done." |
-| **Planner** | Turns the spec into an execution plan (build → maintain → develop → fix → deploy) for the current milestone. In `debug` mode, writes a plan informed by the Tester's failure report. |
-| **Programmer** | Executes the plan inside an isolated sandbox. |
-| **Tester** | Verifies the milestone: static checks → existing test suite → EARS acceptance criteria. Pass advances the loop; failure routes back to the Planner with a structured report. |
+## Agent roles
 
-Each milestone gets `max_attempts` (default 3). On exhaustion the graph pauses via `interrupt()` and waits for human guidance — never fails silently.
+| Node | Role |
+|------|------|
+| Validator | Parses PROJECT.md, extracts spec metadata, milestones, and budget |
+| Base | Creates workspace, initializes git repo, starts Docker sandbox container |
+| Planner | LLM-driven: generates a Plan (create/edit/delete/run steps) for the current milestone |
+| Programmer | Executes the plan: writes files, edits via LLM, runs commands in sandbox |
+| Tester | Runs pytest, checks syntax, LLM-evaluates acceptance criteria -> TestReport |
+| Escalation | HITL interrupt when max_attempts exhausted -- human chooses retry or abort |
+| Deployer | Builds Docker image from workspace and smoke-tests it |
 
-## Repository layout
+## Setup
 
+### Prerequisites
+- Docker with the daemon running
+- Python 3.12+ with uv installed
+- Node.js 22+ with pnpm installed
+
+### Backend
+
+```bash
+cd backend
+uv sync
+
+# Build the sandbox image (used for running untrusted code)
+docker build -t symbiot-sandbox backend/sandbox/
+
+# Configure .env with your model provider
+cp .env.example .env
+# Edit .env: MODEL_PROVIDER, MODEL_NAME, BASE_URL, API_KEY
+# Optionally add LangSmith keys for tracing:
+#   LANGCHAIN_TRACING_V2=true
+#   LANGCHAIN_API_KEY=lsv2_pt_...
+#   LANGCHAIN_PROJECT=symbiot
 ```
-backend/     Python + LangGraph agent graph (FastAPI streaming layer planned)
-  src/
-    graph.py      LangGraph state graph
-    state.py      LoopState contract
-    schemas.py    Milestone / spec schemas
-    nodes/        Agent node implementations
-    sandbox/      Sandboxed execution (Docker)
-    config.py     Settings
-frontend/    Vite + TypeScript + React (React Flow canvas planned)
-projects/    PROJECT.md files — one per project the loop works on
+
+### Frontend
+
+```bash
+cd frontend
+pnpm install
 ```
 
-## Project spec format
+## How to run
 
-Each project lives in `projects/<name>/PROJECT.md` with YAML frontmatter for deterministic parsing and prose for human nuance. Acceptance criteria use **EARS notation** (`WHEN … THE SYSTEM SHALL …`) so they map ~1:1 onto test cases for the Tester agent.
+### 1. CLI (checkpointed, resumable)
+
+```bash
+cd backend
+uv run python run_loop.py
+```
+
+Uses SqliteSaver for checkpointing. Interrupts appear as terminal prompts. Resume by re-running -- it picks up from the checkpoint.
+
+### 2. LangGraph Studio (inspect + debug)
+
+```bash
+cd backend
+uv run langgraph dev
+```
+
+Opens LangSmith Studio. Invoke the `loop` graph interactively.
+
+### 3. Live visualizer
+
+```bash
+# Terminal 1
+cd backend && uv run langgraph dev
+
+# Terminal 2
+cd frontend && pnpm dev
+```
+
+Open http://localhost:5173. Paste a PROJECT.md, hit Run. Watch nodes light up in real time.
+
+## PROJECT.md spec
 
 ```markdown
----
-project: my-app
-version: 1
-end_goal: >
-  One unambiguous paragraph describing what "done" means for the whole project.
-constraints:
-  - "TypeScript strict mode"
-out_of_scope:
-  - "Mobile app — web only for v1"
----
+## META
+name: my-project | stack: python 3.12 | runtime: cli | entrypoint: main.py | smoke_command: --help
 
-## Milestones
+## OBJECTIVE
+One-line description of what this project does.
 
-### M1: Project scaffold
-acceptance_criteria:
-  - WHEN the app is started THE SYSTEM SHALL serve a homepage on localhost
-  - WHEN `npm run build` is run THE SYSTEM SHALL produce a dist/ folder with no errors
-depends_on: []
+## END_CRITERIA
+- Criterion 1
+- Criterion 2
+
+## MILESTONES
+- {id: m1, title: first feature, acceptance_criteria: ["criterion 1"], max_attempts: 3}
+- {id: m2, title: second feature, acceptance_criteria: ["criterion 2"], max_attempts: 3}
+
+## BUDGET
+token_cap: 500000
+llm_call_cap: 50
+
+## OUT_OF_SCOPE
+no database, no web UI
 ```
 
-## Key design decisions
+| Field | Required | Default |
+|-------|----------|---------|
+| name | yes | -- |
+| stack | yes | -- |
+| runtime | yes | -- |
+| entrypoint | no | first .py file in workspace |
+| smoke_command | no | --help |
+| token_cap | no | 2,000,000 |
+| llm_call_cap | no | 100 |
+| max_attempts | no | 3 |
 
-- **Typed shared state** — every agent reads/writes one `LoopState` object (milestones, plan, diff, test report, attempt counter, `mode: build|debug`) instead of re-parsing prose. No information loss at handoffs.
-- **No supervisor agent** — the graph's conditional edges *are* the orchestration. Four agents, no more.
-- **Sandboxed execution** — Programmer/Tester run inside a local Docker container mounted to a throwaway clone of the repo. Nothing autonomous touches the host.
-- **Git convention** — one branch per milestone (`milestone/m1-scaffold`), one commit per attempt, milestone id in commit messages; merged to `main` on Tester pass.
-- **Deterministic verification** — the LLM in the Tester only interprets ambiguous failures and writes the report; lint, typecheck, and test runs do the actual judging.
-- **Deploy as a milestone type** — `type: deploy` milestones run through the same Planner → Programmer → Tester cycle as any other (Tester checks the health endpoint). No fifth agent.
-- **Cost-tuned models** — expensive model only where reasoning matters (Planner); cheap models for parsing and verification (Base, Tester).
+## Safety model
 
-## Roadmap
+- **Sandbox**: All untrusted code runs in an ephemeral Docker container. File writes happen on the host workspace (git-tracked), but command execution (pytest, pip, user scripts) runs inside the container.
+- **Budget governor**: Hard caps on total tokens (token_cap) and LLM invocations (llm_call_cap). Every LLM-calling node checks before invoking. Exhaustion kills the run cleanly.
+- **Run timeout**: Each LLM-calling node checks elapsed time against a configurable limit (default 30 minutes). Exceeding it kills the run.
+- **HITL gates**: Escalation on milestone failure -- human decides retry or abort. Deploy gate after all milestones pass -- human decides whether to build the Docker image. Both use LangGraph interrupt().
+- **max_attempts**: Per-milestone retry limit. After exhausting, goes to escalation instead of silently looping.
+- **Command safety**: Programmer filters commands -- no sudo, no rm -rf /, no paths outside workspace.
 
-- **Phase 0** — Finalize `PROJECT.md` and `LoopState` schemas (spec only, no code).
-- **Phase 1** — MVP loop: Base → Planner → Programmer, SQLite checkpointer, no Tester/frontend.
-- **Phase 2** — Tester node + retry loop with `max_attempts` and `mode: debug`.
-- **Phase 3** — Move execution into local Docker sandboxing.
-- **Phase 4** — Visualization: FastAPI streaming (SSE/WebSocket) + React Flow canvas with live node highlighting and state diffs.
-- **Phase 5** *(optional)* — Human-in-the-loop gates: `interrupt()` before merge and on attempt exhaustion.
-- **Phase 6** *(optional)* — Deploy milestone type.
-- **Phase 7** *(optional)* — Hardening: managed sandbox (E2B/Daytona), Postgres checkpointer, PR-based merges.
+## Production notes
 
-Phases 5–7 are on-demand hardening — everything after Phase 4 completes the idea as specified.
-
-## Getting started
-
-*Skeleton in progress* — the backend graph, state contract, and frontend canvas are being scaffolded per the roadmap above.
-
-## Sources / further reading
-
-- LangGraph human-in-the-loop & `interrupt()`: https://docs.langchain.com/oss/python/langgraph/interrupts
-- LangGraph multi-agent patterns (supervisor vs. swarm): https://focused.io/lab/multi-agent-orchestration-in-langgraph-supervisor-vs-swarm-tradeoffs-and-architecture
-- Spec-driven development, 2026 field guide (Spec Kit, EARS notation): https://dev.to/krlz/spec-driven-development-in-2026-what-it-is-the-tooling-and-how-teams-actually-use-it-2fk2
-- Spec-driven development guide: https://www.thebcms.com/blog/spec-driven-development/
-- LangGraph.js vs. Python parity: https://www.crewship.dev/learn/langgraph-vs-langgraphjs
-- Sandbox comparison (E2B vs. Daytona vs. Modal): https://particula.tech/blog/modal-vs-e2b-vs-daytona-vs-vercel-sandbox-ai-code-execution
-- React-based LangGraph visualizer example: https://github.com/Coding-Crashkurse/LangGraph-Visualizer
+- Swap SqliteSaver -> PostgresSaver for production persistence.
+- Deploy the graph as a langgraph-api server behind an auth proxy.
+- Add authentication middleware (OAuth, API keys) to the LangGraph API.
+- Configure Docker resource limits on sandbox containers (memory, CPU).
+- The deployer builds on the **host** (not inside the sandbox) -- it's a trusted packaging step.

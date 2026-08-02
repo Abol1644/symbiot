@@ -1,0 +1,5 @@
+{
+  "dependencies": ["."],
+  "graphs": { "loop": "./src/symbiot/graph.py:graph" },
+  "env": ".env"
+}
