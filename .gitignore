@@ -1,3 +1,9 @@
 .env
 /backend/.env
 /backend/.langgraph_api
+__pycache__/
+*.pyc
+/.codedev-mcp
+/.playwright-mcp
+/frontend/src-tauri/target
+/frontend/src-tauri/gen

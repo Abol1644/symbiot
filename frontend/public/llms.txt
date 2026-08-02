@@ -1,0 +1,6 @@
+# symbiot mission control
+
+symbiot is a local mission-control interface for a sandboxed multi-agent software factory.
+
+- https://github.com/Abol1644/symbiot
+- /README.md

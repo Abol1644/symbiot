@@ -1,141 +1,170 @@
-import { useState, useRef, useCallback } from "react";
-import { Client } from "@langchain/langgraph-sdk";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createRun, resumeRun, streamRun, type StreamEvent } from "../api/run";
 import type {
-  LogEntry,
-  InterruptPayload,
-  RunStatus,
-  NodeResult,
   ActivityEntry,
+  BudgetInfo,
   CustomEventPayload,
   FileTreeEntry,
+  InterruptPayload,
+  LogEntry,
+  NodeResult,
+  RunConfig,
+  RunRecord,
+  RunStatus,
+  TerminalEntry,
 } from "../types";
-
-const client = new Client({ apiUrl: "http://127.0.0.1:2024" });
 
 function summarizeNodeOutput(node: string, data: Record<string, unknown>): string {
   if (node === "planner") {
     const plan = data.plan as { type?: string; steps?: unknown[] } | undefined;
-    return `produced Plan(type=${plan?.type ?? "?"}, ${plan?.steps?.length ?? 0} steps)`;
+    return `produced ${plan?.type ?? "?"} plan with ${plan?.steps?.length ?? 0} steps`;
   }
   if (node === "programmer") return "applied changes to workspace";
   if (node === "tester") {
-    const tr = data.test_report as { passed?: boolean; confidence?: number } | undefined;
-    return tr ? `${tr.passed ? "PASS" : "FAIL"} (conf=${(tr.confidence ?? 0).toFixed(2)})` : "no report";
+    const report = data.test_report as { passed?: boolean; confidence?: number } | undefined;
+    return report
+      ? `${report.passed ? "PASS" : "FAIL"} with ${(report.confidence ?? 0).toFixed(2)} confidence`
+      : "no report";
   }
-  if (node === "escalation") return data.status_reason ? `abort: ${data.status_reason}` : "escalation";
-  if (node === "validator") return data.status === "rejected" ? "rejected" : "validated";
-  if (node === "base") return "workspace initialized";
-  if (node === "advance") return "milestone done, advancing";
+  if (node === "escalation") return "human decision required";
+  if (node === "validator") return data.status === "rejected" ? "spec rejected" : "spec validated";
+  if (node === "base") return "sandbox workspace initialized";
+  if (node === "advance") return "milestone complete";
   if (node === "cleanup") return "sandbox stopped";
-  return JSON.stringify(data).slice(0, 80);
+  return JSON.stringify(data).slice(0, 100);
 }
 
-type StreamEvt = { event?: string; data?: unknown };
+type StreamEvt = StreamEvent;
 
 interface StreamConsumers {
-  setStatus: (s: RunStatus) => void;
-  setActiveNode: (n: string | null) => void;
-  setCompletedNodes: (r: Record<string, NodeResult>) => void;
-  setAccumState: (s: Record<string, unknown> | null) => void;
+  setStatus: (status: RunStatus) => void;
+  setActiveNode: (node: string | null) => void;
+  setCompletedNodes: (results: Record<string, NodeResult>) => void;
+  setAccumState: (state: Record<string, unknown> | null) => void;
   setLogs: React.Dispatch<React.SetStateAction<LogEntry[]>>;
-  setInterruptPayload: (p: InterruptPayload | null) => void;
+  setInterruptPayload: (payload: InterruptPayload | null) => void;
   setActivity: React.Dispatch<React.SetStateAction<ActivityEntry[]>>;
   setLiveStatus: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setTokensByAgent: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   setFileTree: React.Dispatch<React.SetStateAction<FileTreeEntry[]>>;
+  setTerminal: React.Dispatch<React.SetStateAction<TerminalEntry[]>>;
   stateRef: React.MutableRefObject<Record<string, unknown>>;
   completedRef: React.MutableRefObject<Record<string, NodeResult>>;
 }
 
+function addLog(
+  setLogs: React.Dispatch<React.SetStateAction<LogEntry[]>>,
+  node: string,
+  summary: string,
+) {
+  setLogs(previous => {
+    const next = [...previous, { timestamp: Date.now(), node, summary }];
+    return next.length > 300 ? next.slice(-300) : next;
+  });
+}
+
 async function consumeStream(
   stream: AsyncIterable<StreamEvt>,
-  c: StreamConsumers,
-) {
-  let prevNode: string | null = null;
+  consumers: StreamConsumers,
+): Promise<boolean> {
+  let previousNode: string | null = null;
   let receivedUpdates = false;
 
   for await (const evt of stream) {
-    const e = evt.event;
-    const d = evt.data as Record<string, unknown> | undefined;
+    const event = evt.event;
+    const data = evt.data as Record<string, unknown> | undefined;
 
-    if (e === "metadata") {
-      const meta = d as { run_id?: string } | undefined;
-      c.setLogs(prev => [...prev.slice(-199), { timestamp: Date.now(), node: "system", summary: `run ${meta?.run_id?.slice(0, 8) ?? "?"}...` }]);
+    if (event === "metadata") {
+      const runId = String(data?.run_id ?? "?");
+      addLog(consumers.setLogs, "system", `stream connected · ${runId.slice(0, 8)}`);
       continue;
     }
 
-    if (e === "error") {
-      c.setLogs(prev => [...prev.slice(-199), { timestamp: Date.now(), node: "system", summary: `error: ${String(d)}` }]);
-      c.setStatus("error");
-      return;
+    if (event === "error") {
+      addLog(consumers.setLogs, "system", "stream interrupted by the backend");
+      consumers.setStatus("error");
+      consumers.setActiveNode(null);
+      return false;
     }
 
-    if (e === "custom" && d) {
-      const { agent, msg } = d as unknown as CustomEventPayload;
-      if (agent && msg) {
-        c.setActivity(prev => {
-          const next = [...prev, { ts: Date.now(), agent, msg }];
-          return next.length > 200 ? next.slice(next.length - 200) : next;
+    if (event === "custom" && data) {
+      const payload = data as unknown as CustomEventPayload;
+      if (!payload.agent || !payload.msg) continue;
+      const kind = payload.kind ?? "info";
+      consumers.setActivity(previous => {
+        const next = [...previous, { ts: Date.now(), agent: payload.agent, msg: payload.msg, kind }];
+        return next.length > 300 ? next.slice(-300) : next;
+      });
+      consumers.setLiveStatus(previous => ({ ...previous, [payload.agent]: payload.msg }));
+      if (kind === "stdout" || kind === "stderr") {
+        consumers.setTerminal(previous => {
+          const next = [...previous, { ts: Date.now(), stream: kind, text: payload.msg }];
+          return next.length > 500 ? next.slice(-500) : next;
         });
-        c.setLiveStatus(prev => ({ ...prev, [agent]: msg }));
       }
       continue;
     }
 
-    if (e === "updates" && d) {
-      receivedUpdates = true;
+    if (event !== "updates" || !data) continue;
+    receivedUpdates = true;
 
-      for (const [nodeName, nodeOutput] of Object.entries(d)) {
-        if (nodeName === "__interrupt__") {
-          const val = (nodeOutput as { value: InterruptPayload }[])?.[0]?.value;
-          if (val) { c.setInterruptPayload(val); c.setStatus("interrupted"); return; }
-          continue;
+    for (const [nodeName, nodeOutput] of Object.entries(data)) {
+      if (nodeName === "__interrupt__") {
+        const payload = (nodeOutput as { value: InterruptPayload }[])?.[0]?.value;
+        if (payload) {
+          consumers.setActiveNode("escalation");
+          consumers.setInterruptPayload(payload);
+          consumers.setStatus("interrupted");
+          addLog(consumers.setLogs, "escalation", "human decision required");
+          return true;
         }
-
-        const out = nodeOutput as Record<string, unknown>;
-
-        if (prevNode && prevNode !== nodeName) {
-          const isError = out?.status === "failed";
-          c.completedRef.current = { ...c.completedRef.current, [prevNode]: isError ? "error" : "success" };
-          c.setCompletedNodes(c.completedRef.current);
-        }
-
-        c.setActiveNode(nodeName);
-        prevNode = nodeName;
-
-        c.stateRef.current = { ...c.stateRef.current, [nodeName]: out };
-        c.setAccumState(c.stateRef.current);
-
-        c.setLogs(prev => {
-          const entry: LogEntry = { timestamp: Date.now(), node: nodeName, summary: summarizeNodeOutput(nodeName, out) };
-          const next = [...prev, entry];
-          return next.length > 200 ? next.slice(next.length - 200) : next;
-        });
-
-        if (out.file_tree) {
-          c.setFileTree(out.file_tree as FileTreeEntry[]);
-        }
-        if (out.tokens_by_agent) {
-          c.setTokensByAgent(out.tokens_by_agent as Record<string, number>);
-        }
+        continue;
       }
-      continue;
+
+      const output = (nodeOutput ?? {}) as Record<string, unknown>;
+      if (previousNode && previousNode !== nodeName) {
+        const previousOutput = consumers.stateRef.current;
+        const result = previousOutput.status === "failed" || previousOutput.status === "rejected" ? "error" : "success";
+        consumers.completedRef.current = { ...consumers.completedRef.current, [previousNode]: result };
+        consumers.setCompletedNodes(consumers.completedRef.current);
+      }
+      consumers.setActiveNode(nodeName);
+      previousNode = nodeName;
+      consumers.stateRef.current = {
+        ...consumers.stateRef.current,
+        ...output,
+        last_node: nodeName,
+      };
+      consumers.setAccumState(consumers.stateRef.current);
+      addLog(consumers.setLogs, nodeName, summarizeNodeOutput(nodeName, output));
+
+      if (output.file_tree) consumers.setFileTree(output.file_tree as FileTreeEntry[]);
+      if (output.tokens_by_agent) consumers.setTokensByAgent(output.tokens_by_agent as Record<string, number>);
     }
   }
 
-  if (prevNode) {
-    c.completedRef.current = { ...c.completedRef.current, [prevNode]: "success" };
-    c.setCompletedNodes(c.completedRef.current);
+  if (previousNode) {
+    const result = consumers.stateRef.current.status === "failed" ? "error" : "success";
+    consumers.completedRef.current = { ...consumers.completedRef.current, [previousNode]: result };
+    consumers.setCompletedNodes(consumers.completedRef.current);
   }
-
   if (!receivedUpdates) {
-    c.setStatus("error");
-    c.setLogs(prev => [...prev.slice(-199), { timestamp: Date.now(), node: "system", summary: "no updates received — server may have errored" }]);
-  } else {
-    c.setStatus("done");
+    addLog(consumers.setLogs, "system", "no run updates received");
+    consumers.setStatus("error");
+    consumers.setActiveNode(null);
+    return false;
   }
-  c.setActiveNode(null);
+  const finalState = String(consumers.stateRef.current.status ?? "");
+  consumers.setStatus(finalState === "failed" || finalState === "rejected" ? "error" : "done");
+  consumers.setActiveNode(null);
+  return true;
 }
+
+const DEFAULT_RUN_CONFIG: RunConfig = {
+  primary: { provider: "openai", model: "gpt-4o-mini" },
+  fallbacks: [],
+  timeout_minutes: 30,
+};
 
 interface UseLangGraphStream {
   status: RunStatus;
@@ -150,9 +179,27 @@ interface UseLangGraphStream {
   liveStatus: Record<string, string>;
   tokensByAgent: Record<string, number>;
   fileTree: FileTreeEntry[];
-  startRun: (projectMd: string, sourcePath?: string) => Promise<void>;
-  resumeInterrupt: (choice: string) => Promise<void>;
+  terminal: TerminalEntry[];
+  history: RunRecord[];
+  startRun: (projectMd: string, sourcePath?: string, runConfig?: RunConfig) => Promise<void>;
+  resumeInterrupt: (choice: string | { action: string; guidance?: string }) => Promise<void>;
   reset: () => void;
+}
+
+function readHistory(): RunRecord[] {
+  try {
+    const raw = localStorage.getItem("symbiot.run-history");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as RunRecord[];
+    return Array.isArray(parsed) ? parsed.slice(0, 30) : [];
+  } catch {
+    return [];
+  }
+}
+
+function projectName(spec: string): string {
+  const match = spec.match(/name:\s*([^|\n]+)/i);
+  return match?.[1]?.trim() || "untitled mission";
 }
 
 export function useLangGraphStream(): UseLangGraphStream {
@@ -168,12 +215,41 @@ export function useLangGraphStream(): UseLangGraphStream {
   const [liveStatus, setLiveStatus] = useState<Record<string, string>>({});
   const [tokensByAgent, setTokensByAgent] = useState<Record<string, number>>({});
   const [fileTree, setFileTree] = useState<FileTreeEntry[]>([]);
+  const [terminal, setTerminal] = useState<TerminalEntry[]>([]);
+  const [history, setHistory] = useState<RunRecord[]>(readHistory);
+  const [runId, setRunId] = useState<string | null>(null);
 
   const threadIdRef = useRef<string | null>(null);
   const stateRef = useRef<Record<string, unknown>>({});
   const completedRef = useRef<Record<string, NodeResult>>({});
+  const specRef = useRef("");
+  const runConfigRef = useRef<RunConfig>(DEFAULT_RUN_CONFIG);
+  const startedAtRef = useRef(0);
+  const pendingInterruptRef = useRef<InterruptPayload | null>(null);
 
-  const startRun = useCallback(async (projectMd: string, sourcePath?: string) => {
+  const consumers = useCallback((): StreamConsumers => ({
+    setStatus,
+    setActiveNode,
+    setCompletedNodes,
+    setAccumState,
+    setLogs,
+    setInterruptPayload,
+    setActivity,
+    setLiveStatus,
+    setTokensByAgent,
+    setFileTree,
+    setTerminal,
+    stateRef,
+    completedRef,
+  }), []);
+
+  const startRun = useCallback(async (projectMd: string, sourcePath?: string, runConfig?: RunConfig) => {
+    const selectedConfig = runConfig ?? DEFAULT_RUN_CONFIG;
+    const nextRunId = crypto.randomUUID();
+    specRef.current = projectMd;
+    runConfigRef.current = selectedConfig;
+    startedAtRef.current = Date.now();
+    setRunId(nextRunId);
     setConnectionError(false);
     setStatus("running");
     setActiveNode(null);
@@ -185,65 +261,90 @@ export function useLangGraphStream(): UseLangGraphStream {
     setLiveStatus({});
     setTokensByAgent({});
     setFileTree([]);
+    setTerminal([]);
     stateRef.current = {};
     completedRef.current = {};
+    pendingInterruptRef.current = null;
 
     try {
-      const thread = await client.threads.create();
-      threadIdRef.current = thread.thread_id;
-      setThreadId(thread.thread_id);
-
-      const input: Record<string, unknown> = { raw_spec: projectMd };
-      if (sourcePath) input.source_path = sourcePath;
-
-      const stream = client.runs.stream(thread.thread_id, "loop", {
-        input,
-        streamMode: ["updates", "custom"] as const,
+      const run = await createRun({
+        raw_spec: projectMd,
+        run_config: selectedConfig,
+        ...(sourcePath ? { source_path: sourcePath } : {}),
       });
-
-      await consumeStream(stream as AsyncIterable<StreamEvt>, {
-        setStatus, setActiveNode, setCompletedNodes, setAccumState, setLogs, setInterruptPayload,
-        setActivity, setLiveStatus, setTokensByAgent, setFileTree,
-        stateRef, completedRef,
-      });
-    } catch (err) {
-      console.error("[symbiot]", err);
-      if (err instanceof TypeError || String(err).includes("fetch")) {
-        setConnectionError(true);
-      }
+      threadIdRef.current = run.run_id;
+      setThreadId(run.run_id);
+      await consumeStream(streamRun(run.run_id), consumers());
+    } catch {
+      setConnectionError(true);
       setStatus("error");
       setActiveNode(null);
+      addLog(setLogs, "system", "cannot reach the symbiot run service");
     }
-  }, []);
+  }, [consumers]);
 
-  const resumeInterrupt = useCallback(async (choice: string) => {
+  const resumeInterrupt = useCallback(async (choice: string | { action: string; guidance?: string }) => {
+    const previous = interruptPayload;
+    pendingInterruptRef.current = previous;
     setConnectionError(false);
     setStatus("running");
     setInterruptPayload(null);
-
     try {
       const tid = threadIdRef.current;
-      if (!tid) return;
-
-      const stream = client.runs.stream(tid, "loop", {
-        command: { resume: choice } as { resume: string },
-        streamMode: ["updates", "custom"] as const,
-      });
-
-      await consumeStream(stream as AsyncIterable<StreamEvt>, {
-        setStatus, setActiveNode, setCompletedNodes, setAccumState, setLogs, setInterruptPayload,
-        setActivity, setLiveStatus, setTokensByAgent, setFileTree,
-        stateRef, completedRef,
-      });
-    } catch (err) {
-      console.error("[symbiot]", err);
-      if (err instanceof TypeError || String(err).includes("fetch")) {
-        setConnectionError(true);
+      if (!tid) throw new Error("missing run thread");
+      const response = await resumeRun(tid, choice);
+      const ok = await consumeStream(streamRun(tid, response.cursor), consumers());
+      if (!ok && previous) {
+        setInterruptPayload(previous);
+        setStatus("interrupted");
       }
-      setStatus("error");
-      setActiveNode(null);
+    } catch {
+      if (previous) {
+        setInterruptPayload(previous);
+        setStatus("interrupted");
+      } else {
+        setStatus("error");
+      }
+      addLog(setLogs, "system", "human action could not be applied");
     }
-  }, []);
+  }, [consumers, interruptPayload]);
+
+  useEffect(() => {
+    if (!runId || !["done", "error", "interrupted"].includes(status)) return;
+    const stateBudget = accumState?.budget as Partial<BudgetInfo> | undefined;
+    const budget: BudgetInfo | null = stateBudget
+      ? {
+          tokens_used: Number(stateBudget.tokens_used ?? 0),
+          token_cap: Number(stateBudget.token_cap ?? 0),
+          llm_calls: Number(stateBudget.llm_calls ?? 0),
+          llm_call_cap: Number(stateBudget.llm_call_cap ?? 0),
+          cost_usd: Number(stateBudget.cost_usd ?? 0),
+          cost_cap_usd: stateBudget.cost_cap_usd == null ? null : Number(stateBudget.cost_cap_usd),
+          tokens_by_provider: stateBudget.tokens_by_provider,
+          cost_by_provider: stateBudget.cost_by_provider,
+          calls_by_provider: stateBudget.calls_by_provider,
+        }
+      : null;
+    const record: RunRecord = {
+      id: runId,
+      threadId,
+      startedAt: startedAtRef.current,
+      endedAt: Date.now(),
+      status,
+      projectName: projectName(specRef.current),
+      spec: specRef.current,
+      runConfig: runConfigRef.current,
+      budget,
+      logs,
+      terminal,
+      artifact: typeof accumState?.deploy_result === "object" ? "Docker image produced" : undefined,
+    };
+    setHistory(previous => {
+      const next = [record, ...previous.filter(item => item.id !== runId)].slice(0, 30);
+      localStorage.setItem("symbiot.run-history", JSON.stringify(next));
+      return next;
+    });
+  }, [accumState, logs, runId, status, terminal, threadId]);
 
   const reset = useCallback(() => {
     setStatus("idle");
@@ -258,15 +359,30 @@ export function useLangGraphStream(): UseLangGraphStream {
     setLiveStatus({});
     setTokensByAgent({});
     setFileTree([]);
+    setTerminal([]);
+    setRunId(null);
     threadIdRef.current = null;
     stateRef.current = {};
     completedRef.current = {};
   }, []);
 
   return {
-    status, activeNode, completedNodes, state: accumState, logs,
-    interruptPayload, threadId, connectionError,
-    activity, liveStatus, tokensByAgent, fileTree,
-    startRun, resumeInterrupt, reset,
+    status,
+    activeNode,
+    completedNodes,
+    state: accumState,
+    logs,
+    interruptPayload,
+    threadId,
+    connectionError,
+    activity,
+    liveStatus,
+    tokensByAgent,
+    fileTree,
+    terminal,
+    history,
+    startRun,
+    resumeInterrupt,
+    reset,
   };
 }

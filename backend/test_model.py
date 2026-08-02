@@ -2,9 +2,15 @@
 from symbiot.llm import invoke_structured
 from symbiot.schemas import Plan
 
-result = invoke_structured(
-    system_prompt="You are a planning agent that produces structured plans.",
-    user_prompt="Create a 2-step plan to build a hello world CLI in Python. milestone_id is m1.",
-    schema=Plan,
-)
-print(result)
+
+def main() -> None:
+    result = invoke_structured(
+        system_prompt="You are a planning agent that produces structured plans.",
+        user_prompt="Create a 2-step plan to build a hello world CLI in Python. milestone_id is m1.",
+        schema=Plan,
+    )
+    print(result)
+
+
+if __name__ == "__main__":
+    main()

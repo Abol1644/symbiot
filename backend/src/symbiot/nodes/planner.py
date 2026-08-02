@@ -5,7 +5,7 @@ from langgraph.config import get_stream_writer
 from symbiot.llm import invoke_structured
 from symbiot.schemas import Plan
 from symbiot.state import LoopState
-from symbiot.guards import check_budget, update_budget, BudgetExhaustedError, check_run_timeout, RunTimeoutError
+from symbiot.guards import BudgetLedger, BudgetExhaustedError, RunTimeoutError, check_budget, check_run_timeout
 
 
 def _load_prompt(filename: str) -> str:
@@ -23,6 +23,8 @@ def planner(state: LoopState) -> dict:
         check_run_timeout(state)
     except RunTimeoutError as e:
         return {"status": "failed", "status_reason": str(e)}
+
+    ledger = BudgetLedger(state)
 
     spec = state["spec"]
     milestone = state["milestones"][state["current"]]
@@ -55,6 +57,8 @@ def planner(state: LoopState) -> dict:
         user_parts.append("## Lessons Learned\n" + "\n".join(f"- {l}" for l in lessons))
     if test_report:
         user_parts.append(f"## Test Report\npassed: {test_report.passed}\nconfidence: {test_report.confidence}\nfailures: {test_report.failures}")
+    if state.get("human_guidance"):
+        user_parts.append(f"## Human Guidance\n{state['human_guidance']}")
 
     user_prompt = "\n\n".join(user_parts)
 
@@ -65,9 +69,17 @@ def planner(state: LoopState) -> dict:
             system_prompt=_load_prompt("planner.md"),
             user_prompt=user_prompt,
             schema=Plan,
+            run_config=state.get("run_config"),
+            ledger=ledger,
+            agent="planner",
         )
+    except BudgetExhaustedError as e:
+        return {"status": "failed", "status_reason": str(e), **ledger.state_update()}
     except Exception:
-        return {"status": "failed", "status_reason": "planner LLM invocation failed"}
+        return {
+            "status": "failed",
+            "status_reason": "planner LLM invocation failed",
+            **ledger.state_update(),
+        }
 
-    budget_update = update_budget(state, tokens, "planner")
-    return {"plan": plan, "status": "running", **budget_update}
+    return {"plan": plan, "status": "running", **ledger.state_update()}

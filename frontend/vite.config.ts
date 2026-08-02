@@ -10,8 +10,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:2024",
-        rewrite: (path) => path.replace(/^\/api/, ""),
+        target: "http://127.0.0.1:8100",
       },
       "/fs": {
         target: "http://127.0.0.1:8100",

@@ -1,7 +1,9 @@
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt
+import subprocess
 
 from symbiot.state import LoopState
+from symbiot.providers import redact_sensitive_text
 from symbiot.nodes.validator import validator
 from symbiot.nodes.base import base
 from symbiot.nodes.planner import planner
@@ -48,21 +50,49 @@ def route_after_node(state: LoopState) -> str:
 def escalation(state: LoopState) -> dict:
     milestone = state["milestones"][state["current"]]
     report = state.get("test_report")
-    failures = report.failures if report else ["no test report"]
+    failures = [redact_sensitive_text(str(failure), limit=2000) for failure in report.failures] if report else ["no test report"]
+
+    context_diff = ""
+    workspace = state.get("workspace")
+    if workspace:
+        try:
+            diff = subprocess.run(
+                ["git", "diff", "--no-color", "HEAD"],
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            context_diff = redact_sensitive_text(diff.stdout, limit=12000)
+        except (OSError, subprocess.SubprocessError):
+            context_diff = "Unable to collect workspace diff."
 
     decision = interrupt({
+        "kind": "escalation",
         "question": f"Milestone '{milestone.title}' failed after {state['attempts']} attempts.",
         "failures": failures,
-        "options": ["retry (reset attempts, +3 more)", "abort"],
+        "test_output": redact_sensitive_text(str(state.get("test_output", "")), limit=12000),
+        "context_diff": context_diff,
+        "options": ["retry", "edit", "abort"],
     })
 
-    if "retry" in decision.lower():
-        return {"attempts": 0, "status": "running"}
+    if isinstance(decision, dict):
+        action = str(decision.get("action", "")).lower()
+        guidance = str(decision.get("guidance", "")).strip()
+    else:
+        action = str(decision).lower()
+        guidance = ""
+    if "retry" in action or "edit" in action:
+        result = {"attempts": 0, "status": "running"}
+        if guidance:
+            result["human_guidance"] = redact_sensitive_text(guidance, limit=4000)
+        return result
     return {"status": "failed", "status_reason": "human_abort"}
 
 
 def deploy_gate(state: LoopState) -> dict:
     decision = interrupt({
+        "kind": "deploy",
         "question": f"All milestones passed. Deploy '{state['spec']['name']}' as Docker image?",
         "options": ["deploy", "skip"],
     })

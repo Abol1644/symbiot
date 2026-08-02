@@ -1,0 +1,48 @@
+services:
+  # Builds the image used by every generated-code command. The backend talks
+  # to the local Docker daemon through the socket; it never runs agent code in
+  # the API container itself.
+  sandbox:
+    build:
+      context: ./backend/sandbox
+    image: symbiot-sandbox:latest
+    command: ["sleep", "infinity"]
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8100:8100"
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      HOME: ${SYMBIOT_HOST_WORKSPACE:-${PWD}/.symbiot}
+      SYMBIOT_CONFIG_DIR: /data/.symbiot
+      SYMBIOT_CHECKPOINT_DB: /data/checkpoints.db
+    volumes:
+      - symbiot-data:/data
+      # The same absolute path must be visible to the API container and the
+      # Docker daemon because Sandbox passes it as a bind-mount source.
+      - ${SYMBIOT_HOST_WORKSPACE:-${PWD}/.symbiot}:${SYMBIOT_HOST_WORKSPACE:-${PWD}/.symbiot}
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      sandbox:
+        condition: service_started
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: [history]
+    environment:
+      POSTGRES_DB: symbiot
+      POSTGRES_USER: symbiot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-symbiot-local}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  symbiot-data:
+  postgres-data:

@@ -2,6 +2,7 @@ import re
 from typing import Any
 
 from symbiot.schemas import Budget, Milestone
+from symbiot.providers import normalize_run_config
 from symbiot.state import LoopState
 
 _REQUIRED_SECTIONS = ["## META", "## OBJECTIVE", "## END_CRITERIA", "## MILESTONES", "## BUDGET", "## OUT_OF_SCOPE"]
@@ -37,11 +38,13 @@ def _parse_budget(section: str) -> Budget:
     tu = re.search(r"tokens_used:\s*(\d+)", section)
     llm_cap = re.search(r"llm_call_cap:\s*(\d+)", section)
     llm_used = re.search(r"llm_calls_used:\s*(\d+)", section)
+    cost_cap = re.search(r"cost_cap_usd:\s*([0-9]+(?:\.[0-9]+)?)", section)
     return Budget(
         tokens_used=int(tu.group(1)) if tu else 0,
         token_cap=int(tc.group(1)) if tc else 2_000_000,
         llm_calls=int(llm_used.group(1)) if llm_used else 0,
         llm_call_cap=int(llm_cap.group(1)) if llm_cap else 100,
+        cost_cap_usd=float(cost_cap.group(1)) if cost_cap else None,
     )
 
 
@@ -69,4 +72,14 @@ def validator(state: LoopState) -> dict:
     spec = _parse_spec(raw)
     milestones = _parse_milestone_block(raw)
     budget = _parse_budget(raw)
-    return {"spec": spec, "milestones": milestones, "budget": budget, "status": "running"}
+    try:
+        run_config = normalize_run_config(state.get("run_config"))
+    except ValueError as exc:
+        return {"status": "rejected", "status_reason": f"invalid run config: {exc}"}
+    return {
+        "spec": spec,
+        "milestones": milestones,
+        "budget": budget,
+        "run_config": run_config.model_dump(),
+        "status": "running",
+    }

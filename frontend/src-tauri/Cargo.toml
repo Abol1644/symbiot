@@ -1,0 +1,25 @@
+[package]
+name = "symbiot-desktop"
+version = "2.0.0"
+description = "symbiot mission control desktop shell"
+authors = ["Abol1644"]
+edition = "2021"
+rust-version = "1.77"
+build = "build.rs"
+
+[lib]
+name = "symbiot_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+keyring = "3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-updater = "2"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

@@ -1,0 +1,14 @@
+.git
+.gitignore
+.codedev-mcp
+backend/.env
+backend/.venv
+backend/.pytest_cache
+backend/__pycache__
+backend/src/**/__pycache__
+backend/checkpoints.db
+frontend/node_modules
+frontend/src
+frontend/.vite
+frontend/dist/assets/*.map
+**/*.pyc

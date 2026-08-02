@@ -19,5 +19,8 @@ class LoopState(TypedDict, total=False):
     deploy_approved: bool
     run_started_at: str
     tokens_by_agent: dict[str, int]
+    run_config: dict
+    human_guidance: str
+    test_output: str
     file_tree: list[dict]
     source_path: str

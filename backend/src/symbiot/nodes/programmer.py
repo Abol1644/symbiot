@@ -5,11 +5,12 @@ from pathlib import Path
 from langgraph.config import get_stream_writer
 
 from symbiot.llm import invoke_structured
-from symbiot.schemas import Budget, FileContent
+from symbiot.providers import redact_sensitive_text
+from symbiot.schemas import FileContent
 from symbiot.sandbox.docker_sandbox import Sandbox
 from symbiot.sandbox.git_ops import file_tree
 from symbiot.state import LoopState
-from symbiot.guards import check_budget, BudgetExhaustedError, check_run_timeout, RunTimeoutError
+from symbiot.guards import BudgetLedger, BudgetExhaustedError, RunTimeoutError, check_budget, check_run_timeout
 
 
 def _load_prompt(filename: str) -> str:
@@ -60,17 +61,20 @@ def programmer(state: LoopState) -> dict:
     except RunTimeoutError as e:
         return {"status": "failed", "status_reason": str(e)}
 
+    ledger = BudgetLedger(state)
+
     plan = state.get("plan")
     workspace = state["workspace"]
     attempts = state["attempts"]
     current_cid = state.get("container_id", "")
     updated_container_id: str | None = None
-    total_tokens = 0
-    total_llm_calls = 0
-    tokens_by_agent = state.get("tokens_by_agent", {}).copy()
-
     if plan is None:
-        return {"attempts": attempts + 1, "status": "failed", "status_reason": "no plan"}
+        return {
+            "attempts": attempts + 1,
+            "status": "failed",
+            "status_reason": "no plan",
+            **ledger.state_update(),
+        }
 
     writer({"agent": "programmer", "msg": "Starting plan execution"})
 
@@ -95,15 +99,19 @@ def programmer(state: LoopState) -> dict:
                     system_prompt=_load_prompt("programmer.md"),
                     user_prompt=user_prompt,
                     schema=FileContent,
+                    run_config=state.get("run_config"),
+                    ledger=ledger,
+                    agent="programmer",
                 )
-                total_tokens += tokens
-                total_llm_calls += 1
-                tokens_by_agent["programmer"] = tokens_by_agent.get("programmer", 0) + tokens
                 _write_file(fp, result.content)
+            except BudgetExhaustedError as e:
+                return {
+                    "attempts": attempts + 1,
+                    "status": "failed",
+                    "status_reason": str(e),
+                    **ledger.state_update(),
+                }
             except Exception:
-                total_tokens += 1000
-                total_llm_calls += 1
-                tokens_by_agent["programmer"] = tokens_by_agent.get("programmer", 0) + 1000
                 continue
 
         elif action == "run_command":
@@ -114,7 +122,25 @@ def programmer(state: LoopState) -> dict:
                 if new_id:
                     updated_container_id = new_id
                     current_cid = new_id
-                sandbox.exec(detail)
+                stdout, stderr, exit_code = sandbox.exec(detail)
+                if stdout:
+                    writer({
+                        "agent": "programmer",
+                        "kind": "stdout",
+                        "msg": redact_sensitive_text(stdout, limit=6000),
+                    })
+                if stderr:
+                    writer({
+                        "agent": "programmer",
+                        "kind": "stderr",
+                        "msg": redact_sensitive_text(stderr, limit=6000),
+                    })
+                if exit_code != 0:
+                    writer({
+                        "agent": "programmer",
+                        "kind": "stderr",
+                        "msg": f"command exited with code {exit_code}",
+                    })
             except Exception:
                 pass
 
@@ -126,14 +152,6 @@ def programmer(state: LoopState) -> dict:
     result: dict = {"attempts": attempts + 1}
     if updated_container_id:
         result["container_id"] = updated_container_id
-    if total_llm_calls > 0:
-        budget = state["budget"]
-        result["budget"] = Budget(
-            tokens_used=budget.tokens_used + total_tokens,
-            token_cap=budget.token_cap,
-            llm_calls=budget.llm_calls + total_llm_calls,
-            llm_call_cap=budget.llm_call_cap,
-        )
-        result["tokens_by_agent"] = tokens_by_agent
+    result.update(ledger.state_update())
     result["file_tree"] = file_tree(workspace)
     return result

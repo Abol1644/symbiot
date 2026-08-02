@@ -87,26 +87,39 @@ uv run python run_loop.py
 
 Uses SqliteSaver for checkpointing. Interrupts appear as terminal prompts. Resume by re-running -- it picks up from the checkpoint.
 
-### 2. LangGraph Studio (inspect + debug)
+### 2. Web mission control
 
 ```bash
-cd backend
-uv run langgraph dev
+ cd frontend && pnpm build
+ cd ..
+ uv run uvicorn symbiot.sidecar:app --app-dir backend/src --host 127.0.0.1 --port 8100
 ```
 
-Opens LangSmith Studio. Invoke the `loop` graph interactively.
+Open http://localhost:8100. The FastAPI service serves the React build, starts
+checkpointed graph runs, exposes SSE agent events, and keeps human decisions
+inside the graph interrupt gates.
 
-### 3. Live visualizer
+### 3. Local development visualizer
 
 ```bash
-# Terminal 1
-cd backend && uv run langgraph dev
-
-# Terminal 2
+cd backend && uv run uvicorn symbiot.sidecar:app --host 127.0.0.1 --port 8100
+# second terminal
 cd frontend && pnpm dev
 ```
 
-Open http://localhost:5173. Paste a PROJECT.md, hit Run. Watch nodes light up in real time.
+Open http://localhost:5173. Paste a PROJECT.md, hit Launch mission. Watch the
+factory stream nodes and Docker stdout in real time.
+
+### 4. Web and desktop packaging
+
+```bash
+pnpm --dir frontend install
+pnpm --dir frontend build
+docker compose up --build
+```
+
+See `docs/DEPLOYMENT.md` for Postgres history, Tauri bundles, remote sandbox
+mode, and signing/updater release requirements.
 
 ## PROJECT.md spec
 
@@ -147,7 +160,7 @@ no database, no web UI
 ## Safety model
 
 - **Sandbox**: All untrusted code runs in an ephemeral Docker container. File writes happen on the host workspace (git-tracked), but command execution (pytest, pip, user scripts) runs inside the container.
-- **Budget governor**: Hard caps on total tokens (token_cap) and LLM invocations (llm_call_cap). Every LLM-calling node checks before invoking. Exhaustion kills the run cleanly.
+- **Budget governor**: Hard caps on total tokens (token_cap), LLM invocations (llm_call_cap), and optional cost. Provider retries and fallback calls are counted before they execute, with per-provider usage retained in checkpointed run state.
 - **Run timeout**: Each LLM-calling node checks elapsed time against a configurable limit (default 30 minutes). Exceeding it kills the run.
 - **HITL gates**: Escalation on milestone failure -- human decides retry or abort. Deploy gate after all milestones pass -- human decides whether to build the Docker image. Both use LangGraph interrupt().
 - **max_attempts**: Per-milestone retry limit. After exhausting, goes to escalation instead of silently looping.
@@ -156,7 +169,7 @@ no database, no web UI
 ## Production notes
 
 - Swap SqliteSaver -> PostgresSaver for production persistence.
-- Deploy the graph as a langgraph-api server behind an auth proxy.
+- Put the FastAPI service behind an auth proxy before exposing it outside localhost.
 - Add authentication middleware (OAuth, API keys) to the LangGraph API.
 - Configure Docker resource limits on sandbox containers (memory, CPU).
 - The deployer builds on the **host** (not inside the sandbox) -- it's a trusted packaging step.

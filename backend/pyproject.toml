@@ -11,6 +11,9 @@ dependencies = [
     "pydantic-settings",
     "docker",
     "fastapi",
+    "httpx",
+    "cryptography>=42",
+    "keyring>=25",
     "uvicorn",
     "langgraph-checkpoint-sqlite>=3.1.1",
 ]

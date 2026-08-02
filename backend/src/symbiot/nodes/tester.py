@@ -3,11 +3,12 @@ from pathlib import Path
 from langgraph.config import get_stream_writer
 
 from symbiot.llm import invoke_structured
+from symbiot.providers import redact_sensitive_text
 from symbiot.schemas import TestReport
 from symbiot.sandbox.docker_sandbox import Sandbox
 from symbiot.sandbox.git_ops import file_tree
 from symbiot.state import LoopState
-from symbiot.guards import check_budget, update_budget, BudgetExhaustedError, check_run_timeout, RunTimeoutError
+from symbiot.guards import BudgetLedger, BudgetExhaustedError, RunTimeoutError, check_budget, check_run_timeout
 
 
 def _load_prompt(filename: str) -> str:
@@ -24,11 +25,13 @@ def tester(state: LoopState) -> dict:
     try:
         check_budget(state)
     except BudgetExhaustedError as e:
-        return {"status": "failed", "status_reason": str(e)}
+        return {"status": "failed", "status_reason": str(e), "test_output": ""}
     try:
         check_run_timeout(state)
     except RunTimeoutError as e:
-        return {"status": "failed", "status_reason": str(e)}
+        return {"status": "failed", "status_reason": str(e), "test_output": ""}
+
+    ledger = BudgetLedger(state)
 
     workspace = state["workspace"]
     milestone = state["milestones"][state["current"]]
@@ -50,10 +53,10 @@ def tester(state: LoopState) -> dict:
         writer({"agent": "tester", "msg": "Running pytest"})
         try:
             stdout, stderr, exit_code = sandbox.exec("python -m pytest -v", timeout=30)
-            pytest_output = stdout + "\n" + stderr
+            pytest_output = redact_sensitive_text(stdout + "\n" + stderr, limit=12000)
             artifacts.append("pytest output captured")
         except Exception as e:
-            pytest_output = str(e)
+            pytest_output = redact_sensitive_text(str(e), limit=12000)
             artifacts.append("pytest execution error")
 
     py_files: list[str] = []
@@ -109,9 +112,28 @@ def tester(state: LoopState) -> dict:
             system_prompt=_load_prompt("tester.md"),
             user_prompt=user_prompt,
             schema=TestReport,
+            run_config=state.get("run_config"),
+            ledger=ledger,
+            agent="tester",
         )
+    except BudgetExhaustedError as e:
+        return {
+            "status": "failed",
+            "status_reason": str(e),
+            "test_output": pytest_output,
+            **ledger.state_update(),
+        }
     except Exception:
-        return {"status": "failed", "status_reason": "tester LLM invocation failed"}
+        return {
+            "status": "failed",
+            "status_reason": "tester LLM invocation failed",
+            "test_output": pytest_output,
+            **ledger.state_update(),
+        }
 
-    budget_update = update_budget(state, tokens, "tester")
-    return {"test_report": test_report, "file_tree": file_tree(workspace), **budget_update}
+    return {
+        "test_report": test_report,
+        "test_output": pytest_output,
+        "file_tree": file_tree(workspace),
+        **ledger.state_update(),
+    }

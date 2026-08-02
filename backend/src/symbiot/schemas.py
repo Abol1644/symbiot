@@ -1,5 +1,18 @@
 from typing import Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class ModelSelection(BaseModel):
+    provider: str
+    model: str
+
+
+class RunConfig(BaseModel):
+    primary: ModelSelection = Field(
+        default_factory=lambda: ModelSelection(provider="openai", model="gpt-4o-mini")
+    )
+    fallbacks: list[ModelSelection] = Field(default_factory=list)
+    timeout_minutes: int = Field(default=30, ge=1, le=30)
 
 class Milestone(BaseModel):
     id: str
@@ -33,6 +46,11 @@ class Budget(BaseModel):
     token_cap: int = 2_000_000
     llm_calls: int = 0
     llm_call_cap: int = 100
+    cost_usd: float = 0.0
+    cost_cap_usd: float | None = None
+    tokens_by_provider: dict[str, int] = Field(default_factory=dict)
+    cost_by_provider: dict[str, float] = Field(default_factory=dict)
+    calls_by_provider: dict[str, int] = Field(default_factory=dict)
 
 
 class DeployResult(BaseModel):

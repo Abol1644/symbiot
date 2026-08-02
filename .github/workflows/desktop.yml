@@ -1,0 +1,53 @@
+name: desktop bundles
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install Linux desktop dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - name: Build web shell
+        run: pnpm --dir frontend install --frozen-lockfile && pnpm --dir frontend build
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build AppImage and Debian bundles
+        run: pnpm --dir frontend tauri:build -- --bundles appimage,deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: symbiot-linux
+          path: frontend/src-tauri/target/release/bundle/**
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Build web shell
+        run: pnpm --dir frontend install --frozen-lockfile; pnpm --dir frontend build
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Windows NSIS installer
+        run: pnpm --dir frontend tauri:build -- --bundles nsis
+      - uses: actions/upload-artifact@v4
+        with:
+          name: symbiot-windows
+          path: frontend/src-tauri/target/release/bundle/**

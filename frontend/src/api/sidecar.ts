@@ -23,12 +23,14 @@ export interface GitStatusEntry {
   path: string;
 }
 
+import type { ModelSelection, ProviderInfo, RunConfig } from "../types";
+
 export interface FileTreeEntry {
   path: string;
   size: number;
 }
 
-const BASE = "/fs";
+const BASE = import.meta.env.DEV ? "/fs" : "";
 
 async function get<T>(url: string): Promise<T> {
   const r = await fetch(`${BASE}${url}`);
@@ -69,4 +71,22 @@ export const sidecar = {
     get<GitStatusEntry[]>(`/workspace/${encodeURIComponent(name)}/git/status`),
   gitRollback: (name: string, commit: string) =>
     post<GitCommit[]>(`/workspace/${encodeURIComponent(name)}/git/rollback`, { commit }),
+  listProviders: () => get<ProviderInfo[]>("/providers"),
+  saveProvider: (provider: {
+    id: string;
+    kind: string;
+    default_model: string;
+    base_url?: string | null;
+    label?: string;
+    models?: string[];
+    enabled?: boolean;
+    api_key?: string;
+  }) => post<ProviderInfo>("/providers", provider),
+  testProvider: (id: string, model?: string) =>
+    post<{ ok: boolean; provider: string; model: string; models: { id: string }[] }>(
+      `/providers/${encodeURIComponent(id)}/test`,
+      { model },
+    ),
+  setProviderRouting: (primary: ModelSelection, fallbacks: ModelSelection[]) =>
+    post<RunConfig>("/providers/routing", { primary, fallbacks }),
 };
