@@ -20,14 +20,19 @@ def check_budget(state: LoopState) -> None:
         raise BudgetExhaustedError(f"LLM call cap reached: {budget.llm_calls}/{budget.llm_call_cap}")
 
 
-def update_budget(state: LoopState, tokens_used: int) -> dict:
+def update_budget(state: LoopState, tokens_used: int, agent: str) -> dict:
     budget = state["budget"]
-    return {"budget": Budget(
-        tokens_used=budget.tokens_used + tokens_used,
-        token_cap=budget.token_cap,
-        llm_calls=budget.llm_calls + 1,
-        llm_call_cap=budget.llm_call_cap,
-    )}
+    tokens_by_agent = state.get("tokens_by_agent", {}).copy()
+    tokens_by_agent[agent] = tokens_by_agent.get(agent, 0) + tokens_used
+    return {
+        "budget": Budget(
+            tokens_used=budget.tokens_used + tokens_used,
+            token_cap=budget.token_cap,
+            llm_calls=budget.llm_calls + 1,
+            llm_call_cap=budget.llm_call_cap,
+        ),
+        "tokens_by_agent": tokens_by_agent,
+    }
 
 
 def check_run_timeout(state: LoopState, max_minutes: int = 30) -> None:

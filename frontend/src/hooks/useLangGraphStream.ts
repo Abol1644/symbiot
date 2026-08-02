@@ -1,6 +1,14 @@
 import { useState, useRef, useCallback } from "react";
 import { Client } from "@langchain/langgraph-sdk";
-import type { LogEntry, InterruptPayload, RunStatus, NodeResult } from "../types";
+import type {
+  LogEntry,
+  InterruptPayload,
+  RunStatus,
+  NodeResult,
+  ActivityEntry,
+  CustomEventPayload,
+  FileTreeEntry,
+} from "../types";
 
 const client = new Client({ apiUrl: "http://127.0.0.1:2024" });
 
@@ -31,6 +39,10 @@ interface StreamConsumers {
   setAccumState: (s: Record<string, unknown> | null) => void;
   setLogs: React.Dispatch<React.SetStateAction<LogEntry[]>>;
   setInterruptPayload: (p: InterruptPayload | null) => void;
+  setActivity: React.Dispatch<React.SetStateAction<ActivityEntry[]>>;
+  setLiveStatus: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  setTokensByAgent: React.Dispatch<React.SetStateAction<Record<string, number>>>;
+  setFileTree: React.Dispatch<React.SetStateAction<FileTreeEntry[]>>;
   stateRef: React.MutableRefObject<Record<string, unknown>>;
   completedRef: React.MutableRefObject<Record<string, NodeResult>>;
 }
@@ -56,6 +68,18 @@ async function consumeStream(
       c.setLogs(prev => [...prev.slice(-199), { timestamp: Date.now(), node: "system", summary: `error: ${String(d)}` }]);
       c.setStatus("error");
       return;
+    }
+
+    if (e === "custom" && d) {
+      const { agent, msg } = d as unknown as CustomEventPayload;
+      if (agent && msg) {
+        c.setActivity(prev => {
+          const next = [...prev, { ts: Date.now(), agent, msg }];
+          return next.length > 200 ? next.slice(next.length - 200) : next;
+        });
+        c.setLiveStatus(prev => ({ ...prev, [agent]: msg }));
+      }
+      continue;
     }
 
     if (e === "updates" && d) {
@@ -87,6 +111,13 @@ async function consumeStream(
           const next = [...prev, entry];
           return next.length > 200 ? next.slice(next.length - 200) : next;
         });
+
+        if (out.file_tree) {
+          c.setFileTree(out.file_tree as FileTreeEntry[]);
+        }
+        if (out.tokens_by_agent) {
+          c.setTokensByAgent(out.tokens_by_agent as Record<string, number>);
+        }
       }
       continue;
     }
@@ -115,7 +146,11 @@ interface UseLangGraphStream {
   interruptPayload: InterruptPayload | null;
   threadId: string | null;
   connectionError: boolean;
-  startRun: (projectMd: string) => Promise<void>;
+  activity: ActivityEntry[];
+  liveStatus: Record<string, string>;
+  tokensByAgent: Record<string, number>;
+  fileTree: FileTreeEntry[];
+  startRun: (projectMd: string, sourcePath?: string) => Promise<void>;
   resumeInterrupt: (choice: string) => Promise<void>;
   reset: () => void;
 }
@@ -129,12 +164,16 @@ export function useLangGraphStream(): UseLangGraphStream {
   const [interruptPayload, setInterruptPayload] = useState<InterruptPayload | null>(null);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState(false);
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [liveStatus, setLiveStatus] = useState<Record<string, string>>({});
+  const [tokensByAgent, setTokensByAgent] = useState<Record<string, number>>({});
+  const [fileTree, setFileTree] = useState<FileTreeEntry[]>([]);
 
   const threadIdRef = useRef<string | null>(null);
   const stateRef = useRef<Record<string, unknown>>({});
   const completedRef = useRef<Record<string, NodeResult>>({});
 
-  const startRun = useCallback(async (projectMd: string) => {
+  const startRun = useCallback(async (projectMd: string, sourcePath?: string) => {
     setConnectionError(false);
     setStatus("running");
     setActiveNode(null);
@@ -142,6 +181,10 @@ export function useLangGraphStream(): UseLangGraphStream {
     setAccumState(null);
     setLogs([]);
     setInterruptPayload(null);
+    setActivity([]);
+    setLiveStatus({});
+    setTokensByAgent({});
+    setFileTree([]);
     stateRef.current = {};
     completedRef.current = {};
 
@@ -150,13 +193,17 @@ export function useLangGraphStream(): UseLangGraphStream {
       threadIdRef.current = thread.thread_id;
       setThreadId(thread.thread_id);
 
+      const input: Record<string, unknown> = { raw_spec: projectMd };
+      if (sourcePath) input.source_path = sourcePath;
+
       const stream = client.runs.stream(thread.thread_id, "loop", {
-        input: { raw_spec: projectMd },
-        streamMode: "updates" as const,
+        input,
+        streamMode: ["updates", "custom"] as const,
       });
 
       await consumeStream(stream as AsyncIterable<StreamEvt>, {
         setStatus, setActiveNode, setCompletedNodes, setAccumState, setLogs, setInterruptPayload,
+        setActivity, setLiveStatus, setTokensByAgent, setFileTree,
         stateRef, completedRef,
       });
     } catch (err) {
@@ -180,11 +227,12 @@ export function useLangGraphStream(): UseLangGraphStream {
 
       const stream = client.runs.stream(tid, "loop", {
         command: { resume: choice } as { resume: string },
-        streamMode: "updates" as const,
+        streamMode: ["updates", "custom"] as const,
       });
 
       await consumeStream(stream as AsyncIterable<StreamEvt>, {
         setStatus, setActiveNode, setCompletedNodes, setAccumState, setLogs, setInterruptPayload,
+        setActivity, setLiveStatus, setTokensByAgent, setFileTree,
         stateRef, completedRef,
       });
     } catch (err) {
@@ -206,10 +254,19 @@ export function useLangGraphStream(): UseLangGraphStream {
     setInterruptPayload(null);
     setThreadId(null);
     setConnectionError(false);
+    setActivity([]);
+    setLiveStatus({});
+    setTokensByAgent({});
+    setFileTree([]);
     threadIdRef.current = null;
     stateRef.current = {};
     completedRef.current = {};
   }, []);
 
-  return { status, activeNode, completedNodes, state: accumState, logs, interruptPayload, threadId, connectionError, startRun, resumeInterrupt, reset };
+  return {
+    status, activeNode, completedNodes, state: accumState, logs,
+    interruptPayload, threadId, connectionError,
+    activity, liveStatus, tokensByAgent, fileTree,
+    startRun, resumeInterrupt, reset,
+  };
 }

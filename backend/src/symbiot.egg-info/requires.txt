@@ -5,4 +5,6 @@ langchain-ollama
 langsmith
 pydantic-settings
 docker
+fastapi
+uvicorn
 langgraph-checkpoint-sqlite>=3.1.1

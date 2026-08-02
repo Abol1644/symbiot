@@ -2,9 +2,12 @@ import re
 import shlex
 from pathlib import Path
 
+from langgraph.config import get_stream_writer
+
 from symbiot.llm import invoke_structured
 from symbiot.schemas import Budget, FileContent
 from symbiot.sandbox.docker_sandbox import Sandbox
+from symbiot.sandbox.git_ops import file_tree
 from symbiot.state import LoopState
 from symbiot.guards import check_budget, BudgetExhaustedError, check_run_timeout, RunTimeoutError
 
@@ -47,6 +50,7 @@ def _get_sandbox(workspace: str, container_id: str) -> tuple[Sandbox, str | None
 
 
 def programmer(state: LoopState) -> dict:
+    writer = get_stream_writer()
     try:
         check_budget(state)
     except BudgetExhaustedError as e:
@@ -63,15 +67,20 @@ def programmer(state: LoopState) -> dict:
     updated_container_id: str | None = None
     total_tokens = 0
     total_llm_calls = 0
+    tokens_by_agent = state.get("tokens_by_agent", {}).copy()
 
     if plan is None:
         return {"attempts": attempts + 1, "status": "failed", "status_reason": "no plan"}
+
+    writer({"agent": "programmer", "msg": "Starting plan execution"})
 
     for step in plan.steps:
         action = step.action
         target = step.target
         detail = step.detail
         content = step.content
+
+        writer({"agent": "programmer", "msg": f"{action}: {target}"})
 
         if action == "create_file":
             file_content = content or detail
@@ -89,10 +98,12 @@ def programmer(state: LoopState) -> dict:
                 )
                 total_tokens += tokens
                 total_llm_calls += 1
+                tokens_by_agent["programmer"] = tokens_by_agent.get("programmer", 0) + tokens
                 _write_file(fp, result.content)
             except Exception:
                 total_tokens += 1000
                 total_llm_calls += 1
+                tokens_by_agent["programmer"] = tokens_by_agent.get("programmer", 0) + 1000
                 continue
 
         elif action == "run_command":
@@ -123,4 +134,6 @@ def programmer(state: LoopState) -> dict:
             llm_calls=budget.llm_calls + total_llm_calls,
             llm_call_cap=budget.llm_call_cap,
         )
+        result["tokens_by_agent"] = tokens_by_agent
+    result["file_tree"] = file_tree(workspace)
     return result

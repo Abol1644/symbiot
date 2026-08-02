@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from langgraph.config import get_stream_writer
+
 from symbiot.llm import invoke_structured
 from symbiot.schemas import Plan
 from symbiot.state import LoopState
@@ -12,6 +14,7 @@ def _load_prompt(filename: str) -> str:
 
 
 def planner(state: LoopState) -> dict:
+    writer = get_stream_writer()
     try:
         check_budget(state)
     except BudgetExhaustedError as e:
@@ -36,16 +39,26 @@ def planner(state: LoopState) -> dict:
         else:
             plan_type = "debug"
 
+    writer({"agent": "planner", "msg": f"Analyzing milestone {milestone.id}"})
+
     user_parts = [
         f"## Plan Type: {plan_type}\n\n## Project Specification\nname: {spec.get('name', 'unknown')}\nstack: {spec.get('stack', 'python')}\nruntime: {spec.get('runtime', 'cli')}\nobjective: {spec.get('objective', '')}\n",
         f"## Current Milestone\nid: {milestone.id}\ntitle: {milestone.title}\nacceptance criteria:\n" + "\n".join(f"- {c}" for c in milestone.acceptance_criteria),
     ]
+
+    ft = state.get("file_tree", [])
+    if ft:
+        lines = "\n".join(f"- {f['path']} ({f['status']})" for f in ft[:60])
+        user_parts.append(f"## Existing Files in Workspace\n{lines}")
+
     if lessons:
         user_parts.append("## Lessons Learned\n" + "\n".join(f"- {l}" for l in lessons))
     if test_report:
         user_parts.append(f"## Test Report\npassed: {test_report.passed}\nconfidence: {test_report.confidence}\nfailures: {test_report.failures}")
 
     user_prompt = "\n\n".join(user_parts)
+
+    writer({"agent": "planner", "msg": f"Drafting {plan_type} plan"})
 
     try:
         plan, tokens = invoke_structured(
@@ -56,5 +69,5 @@ def planner(state: LoopState) -> dict:
     except Exception:
         return {"status": "failed", "status_reason": "planner LLM invocation failed"}
 
-    budget_update = update_budget(state, tokens)
+    budget_update = update_budget(state, tokens, "planner")
     return {"plan": plan, "status": "running", **budget_update}

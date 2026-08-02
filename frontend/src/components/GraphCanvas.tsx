@@ -20,7 +20,10 @@ function AgentNode({ data, id }: NodeProps) {
   return (
     <div className={cls}>
       <Handle type="target" position={Position.Top} style={{ visibility: "hidden" }} />
-      {data?.label as string ?? id}
+      <div className="node-label">{data?.label as string ?? id}</div>
+      {data?.liveMsg != null && (
+        <div className="node-live-status">{String(data.liveMsg)}</div>
+      )}
       <Handle type="source" position={Position.Bottom} style={{ visibility: "hidden" }} />
     </div>
   );
@@ -32,9 +35,10 @@ interface GraphCanvasProps {
   activeNode: string | null;
   completedNodes: Record<string, NodeResult>;
   status: RunStatus;
+  liveStatus: Record<string, string>;
 }
 
-export function GraphCanvas({ activeNode, completedNodes, status }: GraphCanvasProps) {
+export function GraphCanvas({ activeNode, completedNodes, status, liveStatus }: GraphCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState(GRAPH_NODES);
   const [edges] = useEdgesState(GRAPH_EDGES);
 
@@ -47,10 +51,11 @@ export function GraphCanvas({ activeNode, completedNodes, status }: GraphCanvasP
           ...n.data,
           active: n.id === activeNode && status === "running",
           result: completedNodes[n.id] ?? null,
+          liveMsg: liveStatus[n.id] ?? null,
         },
       }))
     );
-  }, [activeNode, completedNodes, status, setNodes]);
+  }, [activeNode, completedNodes, status, liveStatus, setNodes]);
 
   return (
     <ReactFlow

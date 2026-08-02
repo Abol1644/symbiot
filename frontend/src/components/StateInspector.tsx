@@ -43,28 +43,14 @@ interface StateInspectorProps {
 }
 
 export function StateInspector({ state }: StateInspectorProps) {
-  const budget = useMemo(() => {
-    if (!state?.budget) return null;
-    const b = state.budget as { tokens_used?: number; token_cap?: number; llm_calls?: number; llm_call_cap?: number };
-    return {
-      tokens_used: b.tokens_used ?? 0,
-      token_cap: b.token_cap ?? 0,
-      llm_calls: b.llm_calls ?? 0,
-      llm_call_cap: b.llm_call_cap ?? 0,
-    };
-  }, [state]);
-
   const deploy = useMemo(() => {
     if (!state?.deploy_result) return null;
     return state.deploy_result as { image?: string; tag?: string; smoke_test_passed?: boolean; smoke_test_output?: string };
   }, [state]);
 
-  const tokenPct = budget && budget.token_cap > 0 ? Math.min(100, (budget.tokens_used / budget.token_cap) * 100) : 0;
-  const callPct = budget && budget.llm_call_cap > 0 ? Math.min(100, (budget.llm_calls / budget.llm_call_cap) * 100) : 0;
-
   return (
     <div className="state-inspector">
-      <div className="state-header">State</div>
+      <div className="panel-header">State</div>
 
       {deploy && (
         <div className="deploy-card">
@@ -81,35 +67,10 @@ export function StateInspector({ state }: StateInspectorProps) {
         </div>
       )}
 
-      {budget && (
-        <>
-          <div className="budget-bar-wrap">
-            <span>tokens</span>
-            <div className="budget-bar">
-              <div
-                className={`budget-bar-fill${tokenPct > 90 ? " error" : tokenPct > 70 ? " warn" : ""}`}
-                style={{ width: `${tokenPct}%` }}
-              />
-            </div>
-            <span>{budget.tokens_used.toLocaleString()} / {budget.token_cap.toLocaleString()}</span>
-          </div>
-          <div className="budget-bar-wrap">
-            <span>calls</span>
-            <div className="budget-bar">
-              <div
-                className={`budget-bar-fill${callPct > 90 ? " error" : callPct > 70 ? " warn" : ""}`}
-                style={{ width: `${callPct}%` }}
-              />
-            </div>
-            <span>{budget.llm_calls} / {budget.llm_call_cap}</span>
-          </div>
-        </>
-      )}
-
       {state && (
         <div className="state-json">
           {Object.entries(state)
-            .filter(([k]) => k !== "budget" && k !== "raw_spec")
+            .filter(([k]) => k !== "budget" && k !== "raw_spec" && k !== "tokens_by_agent" && k !== "file_tree")
             .map(([key, value]) => (
               <div key={key} style={{ marginBottom: 8 }}>
                 {colorizedJson(formatState(key, value))}

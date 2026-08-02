@@ -5,6 +5,7 @@ src/symbiot/graph.py
 src/symbiot/guards.py
 src/symbiot/llm.py
 src/symbiot/schemas.py
+src/symbiot/sidecar.py
 src/symbiot/state.py
 src/symbiot.egg-info/PKG-INFO
 src/symbiot.egg-info/SOURCES.txt
@@ -13,6 +14,7 @@ src/symbiot.egg-info/requires.txt
 src/symbiot.egg-info/top_level.txt
 src/symbiot/nodes/__init__.py
 src/symbiot/nodes/base.py
+src/symbiot/nodes/deployer.py
 src/symbiot/nodes/planner.py
 src/symbiot/nodes/programmer.py
 src/symbiot/nodes/router.py

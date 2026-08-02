@@ -3,6 +3,8 @@ from pathlib import Path
 import docker
 from docker.errors import BuildError, DockerException
 
+from langgraph.config import get_stream_writer
+
 from symbiot.schemas import DeployResult
 from symbiot.state import LoopState
 
@@ -20,6 +22,7 @@ def _find_entrypoint(workspace: str, spec: dict) -> str:
 
 
 def deployer(state: LoopState) -> dict:
+    writer = get_stream_writer()
     workspace = state["workspace"]
     spec = state["spec"]
     spec_name = spec.get("name", "project")
@@ -59,6 +62,8 @@ def deployer(state: LoopState) -> dict:
     except DockerException:
         return {"status": "failed", "status_reason": "docker not available"}
 
+    writer({"agent": "deployer", "msg": "Building Docker image"})
+
     try:
         image, _logs = client.images.build(
             path=str(ws_path),
@@ -69,6 +74,8 @@ def deployer(state: LoopState) -> dict:
         return {"status": "failed", "status_reason": f"deploy_build_failed: {e}"}
     except Exception as e:
         return {"status": "failed", "status_reason": f"deploy_build_failed: {e}"}
+
+    writer({"agent": "deployer", "msg": "Running smoke test"})
 
     smoke_cmd = spec.get("smoke_command", "--help")
     smoke_passed = False

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ProjectLoader } from "./ProjectLoader";
 import type { RunStatus } from "../types";
 
 const DEFAULT_SPEC = `## META
@@ -27,15 +28,21 @@ interface ControlPanelProps {
   status: RunStatus;
   threadId: string | null;
   connectionError: boolean;
-  onStartRun: (spec: string) => void;
+  onStartRun: (spec: string, sourcePath?: string) => void;
   onReset: () => void;
 }
 
 export function ControlPanel({ status, threadId, connectionError, onStartRun, onReset }: ControlPanelProps) {
   const [specText, setSpecText] = useState(DEFAULT_SPEC);
   const [showSpec, setShowSpec] = useState(false);
+  const [sourcePath, setSourcePath] = useState<string | null>(null);
 
   const isRunning = status === "running";
+
+  const handleStart = () => {
+    setShowSpec(false);
+    onStartRun(specText, sourcePath ?? undefined);
+  };
 
   return (
     <>
@@ -57,6 +64,19 @@ export function ControlPanel({ status, threadId, connectionError, onStartRun, on
         >
           Reset
         </button>
+
+        <ProjectLoader
+          onLoadSpec={(spec) => setSpecText(spec)}
+          onSelectSource={(p) => setSourcePath(p)}
+          sourcePath={sourcePath}
+        />
+
+        {sourcePath && (
+          <span className="source-chip" title={sourcePath}>
+            src: {sourcePath.split("/").pop()}
+            <button className="chip-close" onClick={() => setSourcePath(null)}>x</button>
+          </span>
+        )}
 
         <span className={`status-badge status-${status}`}>{status}</span>
 
@@ -82,13 +102,7 @@ export function ControlPanel({ status, threadId, connectionError, onStartRun, on
             />
             <div className="spec-modal-actions">
               <button className="btn" onClick={() => setShowSpec(false)}>Cancel</button>
-              <button
-                className="btn btn-run"
-                onClick={() => {
-                  setShowSpec(false);
-                  onStartRun(specText);
-                }}
-              >
+              <button className="btn btn-run" onClick={handleStart}>
                 Start Run
               </button>
             </div>

@@ -13,6 +13,10 @@ export default defineConfig({
         target: "http://127.0.0.1:2024",
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
+      "/fs": {
+        target: "http://127.0.0.1:8100",
+        rewrite: (path) => path.replace(/^\/fs/, ""),
+      },
     },
   },
 })

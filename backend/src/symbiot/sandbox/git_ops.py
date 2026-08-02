@@ -52,3 +52,41 @@ def rollback(path: str, commit_hash: str) -> None:
         capture_output=True,
         text=True,
     )
+
+
+def file_tree(workspace: str) -> list[dict]:
+    committed = set(_run(["git", "ls-files"], workspace).split("\n"))
+    committed.discard("")
+
+    status_out = _run(["git", "status", "--porcelain"], workspace)
+    status_map: dict[str, str] = {}
+    created: set[str] = set()
+    for line in status_out.split("\n"):
+        if not line.strip():
+            continue
+        code = line[:2].strip()
+        path = line[3:].strip()
+        if path.startswith(".git"):
+            continue
+        if code in ("??", "A"):
+            created.add(path)
+            status_map[path] = "created"
+        elif code == "M":
+            status_map[path] = "modified"
+        else:
+            status_map[path] = "modified"
+
+    result: list[dict] = []
+    seen: set[str] = set()
+
+    for p in sorted(created):
+        seen.add(p)
+        result.append({"path": p, "status": "created"})
+
+    for p in sorted(committed):
+        if p in seen or p.startswith(".git"):
+            continue
+        seen.add(p)
+        result.append({"path": p, "status": status_map.get(p, "existing")})
+
+    return result

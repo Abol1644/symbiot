@@ -1,8 +1,11 @@
 from pathlib import Path
 
+from langgraph.config import get_stream_writer
+
 from symbiot.llm import invoke_structured
 from symbiot.schemas import TestReport
 from symbiot.sandbox.docker_sandbox import Sandbox
+from symbiot.sandbox.git_ops import file_tree
 from symbiot.state import LoopState
 from symbiot.guards import check_budget, update_budget, BudgetExhaustedError, check_run_timeout, RunTimeoutError
 
@@ -17,6 +20,7 @@ def _rglob(root: Path, pattern: str) -> list[Path]:
 
 
 def tester(state: LoopState) -> dict:
+    writer = get_stream_writer()
     try:
         check_budget(state)
     except BudgetExhaustedError as e:
@@ -43,6 +47,7 @@ def tester(state: LoopState) -> dict:
 
     has_tests = bool(_rglob(ws_path, "test_*.py")) or (ws_path / "tests").is_dir()
     if has_tests:
+        writer({"agent": "tester", "msg": "Running pytest"})
         try:
             stdout, stderr, exit_code = sandbox.exec("python -m pytest -v", timeout=30)
             pytest_output = stdout + "\n" + stderr
@@ -89,6 +94,9 @@ def tester(state: LoopState) -> dict:
             pass
 
     criteria_text = "\n".join(f"- {c}" for c in milestone.acceptance_criteria)
+
+    writer({"agent": "tester", "msg": "Judging acceptance criteria"})
+
     user_prompt = (
         f"## Acceptance Criteria\n{criteria_text}\n\n"
         f"## Test Output\n```\n{pytest_output[:5000]}\n```\n\n"
@@ -105,5 +113,5 @@ def tester(state: LoopState) -> dict:
     except Exception:
         return {"status": "failed", "status_reason": "tester LLM invocation failed"}
 
-    budget_update = update_budget(state, tokens)
-    return {"test_report": test_report, **budget_update}
+    budget_update = update_budget(state, tokens, "tester")
+    return {"test_report": test_report, "file_tree": file_tree(workspace), **budget_update}

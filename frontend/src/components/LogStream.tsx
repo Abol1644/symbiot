@@ -26,7 +26,7 @@ export function LogStream({ logs }: LogStreamProps) {
 
   return (
     <>
-      <div className="state-header">Logs</div>
+      <div className="panel-header">Logs</div>
       <div className="log-stream">
         {logs.length === 0 && (
           <div className="empty-state" style={{ padding: 40 }}>
