@@ -1,21 +1,34 @@
+import logging
 import re
 import shlex
+import subprocess
 from pathlib import Path
 
 from langgraph.config import get_stream_writer
 
 from symbiot.llm import invoke_structured
 from symbiot.providers import redact_sensitive_text
+from symbiot.redaction import redact_secrets
 from symbiot.schemas import FileContent
-from symbiot.sandbox.docker_sandbox import Sandbox
-from symbiot.sandbox.git_ops import file_tree
+from symbiot.git_ops import file_tree
 from symbiot.state import LoopState
 from symbiot.guards import BudgetLedger, BudgetExhaustedError, RunTimeoutError, check_budget, check_run_timeout
+
+logger = logging.getLogger(__name__)
 
 
 def _load_prompt(filename: str) -> str:
     path = Path(__file__).resolve().parent.parent / "prompts" / filename
     return path.read_text()
+
+
+def validate_workspace_target(workspace: Path, target: str) -> Path:
+    resolved = (workspace / target).resolve()
+    if not resolved.is_relative_to(workspace.resolve()):
+        raise ValueError(f"Target escapes workspace: {target}")
+    if Path(target).is_absolute() or ".." in Path(target).parts:
+        raise ValueError(f"Invalid target: {target}")
+    return resolved
 
 
 def _write_file(path: Path, content: str) -> None:
@@ -32,22 +45,18 @@ def _is_safe_command(cmd: str, workspace: str) -> bool:
         tokens = shlex.split(cmd)
     except ValueError:
         return False
+    ws_resolved = Path(workspace).resolve()
     for token in tokens:
-        if token.startswith("/") and not token.startswith(workspace + "/"):
+        candidate = Path(token)
+        if not candidate.is_absolute():
+            continue
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            return False
+        if not resolved.is_relative_to(ws_resolved):
             return False
     return True
-
-
-def _get_sandbox(workspace: str, container_id: str) -> tuple[Sandbox, str | None]:
-    sandbox = Sandbox(workspace)
-    if container_id:
-        try:
-            sandbox.reconnect(container_id)
-            return sandbox, None
-        except RuntimeError:
-            pass
-    new_id = sandbox.start()
-    return sandbox, new_id
 
 
 def programmer(state: LoopState) -> dict:
@@ -66,8 +75,6 @@ def programmer(state: LoopState) -> dict:
     plan = state.get("plan")
     workspace = state["workspace"]
     attempts = state["attempts"]
-    current_cid = state.get("container_id", "")
-    updated_container_id: str | None = None
     if plan is None:
         return {
             "attempts": attempts + 1,
@@ -87,17 +94,28 @@ def programmer(state: LoopState) -> dict:
         writer({"agent": "programmer", "msg": f"{action}: {target}"})
 
         if action == "create_file":
+            try:
+                fp = validate_workspace_target(Path(workspace), target)
+            except ValueError:
+                logger.warning("Rejected %s target: %r", action, target)
+                raise
             file_content = content or detail
-            _write_file(Path(workspace) / target, file_content)
+            _write_file(fp, file_content)
 
         elif action == "edit_file":
-            fp = Path(workspace) / target
+            try:
+                fp = validate_workspace_target(Path(workspace), target)
+            except ValueError:
+                logger.warning("Rejected %s target: %r", action, target)
+                raise
             current_content = fp.read_text() if fp.exists() else ""
-            user_prompt = f"## Current file content\n```\n{current_content}\n```\n\n## Edit instruction\n{detail}\n\nReturn the complete modified file content."
             try:
                 result, tokens = invoke_structured(
                     system_prompt=_load_prompt("programmer.md"),
-                    user_prompt=user_prompt,
+                    user_prompt=(
+                        f"## Current file content\n```\n{redact_secrets(current_content)}\n```\n\n"
+                        f"## Edit instruction\n{detail}\n\nReturn the complete modified file content."
+                    ),
                     schema=FileContent,
                     run_config=state.get("run_config"),
                     ledger=ledger,
@@ -118,11 +136,15 @@ def programmer(state: LoopState) -> dict:
             if not _is_safe_command(detail, workspace):
                 continue
             try:
-                sandbox, new_id = _get_sandbox(workspace, current_cid)
-                if new_id:
-                    updated_container_id = new_id
-                    current_cid = new_id
-                stdout, stderr, exit_code = sandbox.exec(detail)
+                result = subprocess.run(
+                    shlex.split(detail),
+                    cwd=workspace,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                stdout = result.stdout or ""
+                stderr = result.stderr or ""
                 if stdout:
                     writer({
                         "agent": "programmer",
@@ -135,23 +157,25 @@ def programmer(state: LoopState) -> dict:
                         "kind": "stderr",
                         "msg": redact_sensitive_text(stderr, limit=6000),
                     })
-                if exit_code != 0:
+                if result.returncode != 0:
                     writer({
                         "agent": "programmer",
                         "kind": "stderr",
-                        "msg": f"command exited with code {exit_code}",
+                        "msg": f"command exited with code {result.returncode}",
                     })
             except Exception:
                 pass
 
         elif action == "delete_file":
-            fp = Path(workspace) / target
+            try:
+                fp = validate_workspace_target(Path(workspace), target)
+            except ValueError:
+                logger.warning("Rejected %s target: %r", action, target)
+                raise
             if fp.exists():
                 fp.unlink()
 
     result: dict = {"attempts": attempts + 1}
-    if updated_container_id:
-        result["container_id"] = updated_container_id
     result.update(ledger.state_update())
     result["file_tree"] = file_tree(workspace)
     return result

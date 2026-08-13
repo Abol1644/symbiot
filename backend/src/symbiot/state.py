@@ -12,7 +12,6 @@ class LoopState(TypedDict, total=False):
     attempts: int
     lessons: list[str]
     budget: Budget
-    container_id: str
     status: str                # running | passed | failed | rejected
     status_reason: str
     deploy_result: dict

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from symbiot.schemas import Budget
@@ -125,7 +125,7 @@ def check_run_timeout(state: LoopState, max_minutes: int = 30) -> None:
     started = state.get("run_started_at")
     if not started:
         return
-    elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(started)).total_seconds()
+    elapsed = (datetime.now(UTC) - datetime.fromisoformat(started)).total_seconds()
     configured = state.get("run_config", {}).get("timeout_minutes", max_minutes)
     try:
         effective_minutes = min(max_minutes, max(1, int(configured)))

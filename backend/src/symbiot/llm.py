@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Mapping, TypeVar
+from typing import Any, TypeVar
+from collections.abc import Mapping
 
 from pydantic import BaseModel, ValidationError
 

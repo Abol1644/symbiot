@@ -7,14 +7,18 @@ them in response objects, run state, or error messages.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import math
 import os
 import random
 import re
+import socket
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterator, Mapping, Protocol, Sequence, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from urllib.parse import urlparse
 
 import httpx
 
@@ -23,6 +27,58 @@ from symbiot.schemas import ModelSelection, RunConfig
 
 
 ChatMessage = Mapping[str, str]
+
+BLOCKED_RANGES = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+METADATA_IPS = {"169.254.169.254", "fd00:ec2::254"}
+LOCAL_PROVIDERS = {"ollama", "vllm"}
+_URL_VALIDATION_CACHE: dict[tuple[str, str], str | None] = {}
+
+
+def _check_provider_url(url: str, provider_type: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        if not (parsed.scheme == "http" and provider_type in LOCAL_PROVIDERS):
+            raise ValueError(f"Insecure scheme: {parsed.scheme}")
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("No hostname in URL")
+    if any(x in hostname for x in (".internal", ".local", ".metadata")):
+        raise ValueError(f"Blocked hostname: {hostname}")
+    try:
+        ip = ipaddress.ip_address(socket.gethostbyname(hostname))
+    except (socket.gaierror, ValueError):
+        return  # Can't resolve, let the HTTP client handle it
+    if str(ip) in METADATA_IPS:
+        raise ValueError(f"Metadata IP blocked: {ip}")
+    if provider_type not in LOCAL_PROVIDERS:
+        for network in BLOCKED_RANGES:
+            if ip in network:
+                raise ValueError(f"Blocked IP range: {ip}")
+
+
+def validate_provider_url(url: str, provider_type: str) -> None:
+    """Reject SSRF-prone provider endpoints before any outbound request."""
+    key = (url, provider_type)
+    if key in _URL_VALIDATION_CACHE:
+        error = _URL_VALIDATION_CACHE[key]
+        if error is not None:
+            raise ValueError(error)
+        return
+    try:
+        _check_provider_url(url, provider_type)
+    except ValueError as exc:
+        _URL_VALIDATION_CACHE[key] = str(exc)
+        raise
+    _URL_VALIDATION_CACHE[key] = None
 
 
 @dataclass(frozen=True)
@@ -297,12 +353,19 @@ class _HttpProvider:
         client: httpx.Client | None = None,
         timeout_seconds: float = 60.0,
         default_models: Sequence[str] = (),
+        provider_type: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.client = client or httpx.Client(timeout=timeout_seconds)
         self.timeout_seconds = timeout_seconds
         self.default_models = tuple(default_models)
+        self.provider_type = provider_type or self.name
+        self._owns_client = client is None
+
+    def _assert_safe_url(self) -> None:
+        if self._owns_client:
+            validate_provider_url(self.base_url, self.provider_type)
 
     def _headers(self) -> dict[str, str]:
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
@@ -333,6 +396,7 @@ class _HttpProvider:
         )
 
     def _request_json(self, method: str, path: str, **kwargs: Any) -> Mapping[str, Any]:
+        self._assert_safe_url()
         kwargs.setdefault("headers", self._headers())
         kwargs.setdefault("timeout", self.timeout_seconds)
         try:
@@ -350,6 +414,7 @@ class _HttpProvider:
         return payload
 
     def _open_stream(self, path: str, **kwargs: Any) -> httpx.Response:
+        self._assert_safe_url()
         kwargs.setdefault("headers", self._headers())
         kwargs.setdefault("timeout", self.timeout_seconds)
         try:
@@ -407,9 +472,15 @@ class _HttpProvider:
 class OpenAICompatibleProvider(_HttpProvider):
     """Adapter for OpenAI and OpenAI-compatible chat-completions APIs."""
 
-    def __init__(self, *, provider_name: str = "generic", **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *,
+        provider_name: str = "generic",
+        provider_type: str | None = None,
+        **kwargs: Any,
+    ) -> None:
         self.name = provider_name
-        super().__init__(**kwargs)
+        super().__init__(provider_type=provider_type, **kwargs)
 
     def _payload(
         self,
@@ -553,11 +624,16 @@ class OpenCodeAIProvider(OpenAICompatibleProvider):
 
 
 class GenericOpenAICompatibleProvider(OpenAICompatibleProvider):
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, *, provider_type: str | None = None, **kwargs: Any) -> None:
         base_url = kwargs.pop("base_url", None)
         if not base_url:
             raise ValueError("base_url is required for a generic OpenAI-compatible provider")
-        super().__init__(provider_name="generic", base_url=base_url, **kwargs)
+        super().__init__(
+            provider_name="generic",
+            provider_type=provider_type,
+            base_url=base_url,
+            **kwargs,
+        )
 
 
 class AnthropicProvider(_HttpProvider):
@@ -752,7 +828,7 @@ def create_provider(
     if kind in {"opencode", "opencode_ai"}:
         return OpenCodeAIProvider(**kwargs)
     if kind in {"generic", "openai_compatible", "ollama", "vllm"}:
-        return GenericOpenAICompatibleProvider(**kwargs)
+        return GenericOpenAICompatibleProvider(provider_type=kind, **kwargs)
     raise ProviderConfigurationError(
         f"unsupported provider kind '{definition.kind}'",
         provider=definition.id,

@@ -1,12 +1,13 @@
+import subprocess
 from pathlib import Path
 
 from langgraph.config import get_stream_writer
 
 from symbiot.llm import invoke_structured
 from symbiot.providers import redact_sensitive_text
+from symbiot.redaction import redact_secrets
 from symbiot.schemas import TestReport
-from symbiot.sandbox.docker_sandbox import Sandbox
-from symbiot.sandbox.git_ops import file_tree
+from symbiot.git_ops import file_tree
 from symbiot.state import LoopState
 from symbiot.guards import BudgetLedger, BudgetExhaustedError, RunTimeoutError, check_budget, check_run_timeout
 
@@ -40,59 +41,57 @@ def tester(state: LoopState) -> dict:
     artifacts: list[str] = []
     pytest_output = ""
 
-    sandbox = Sandbox(workspace)
-    container_id = state.get("container_id", "")
-    if container_id:
-        try:
-            sandbox.reconnect(container_id)
-        except RuntimeError:
-            pass
-
     has_tests = bool(_rglob(ws_path, "test_*.py")) or (ws_path / "tests").is_dir()
     if has_tests:
         writer({"agent": "tester", "msg": "Running pytest"})
         try:
-            stdout, stderr, exit_code = sandbox.exec("python -m pytest -v", timeout=30)
-            pytest_output = redact_sensitive_text(stdout + "\n" + stderr, limit=12000)
+            result = subprocess.run(
+                [subprocess.sys.executable, "-m", "pytest", "-v"],
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            pytest_output = redact_sensitive_text(
+                result.stdout + "\n" + result.stderr, limit=12000
+            )
             artifacts.append("pytest output captured")
         except Exception as e:
             pytest_output = redact_sensitive_text(str(e), limit=12000)
             artifacts.append("pytest execution error")
 
-    py_files: list[str] = []
-    try:
-        file_list_raw, _, _ = sandbox.exec("find . -name '*.py'", timeout=10)
-        py_files = [f.strip() for f in file_list_raw.split("\n") if f.strip()]
-    except Exception:
-        py_files = [str(p.relative_to(ws_path)) for p in _rglob(ws_path, "*.py")]
-
-    all_files: list[str] = []
-    try:
-        all_raw, _, _ = sandbox.exec("find . -type f", timeout=10)
-        all_files = [f.strip() for f in all_raw.split("\n") if f.strip()]
-    except Exception:
-        all_files = py_files
+    py_files: list[str] = [
+        str(p.relative_to(ws_path)) for p in _rglob(ws_path, "*.py")
+    ]
+    all_files: list[str] = [
+        str(p.relative_to(ws_path))
+        for p in _rglob(ws_path, "*")
+        if p.is_file()
+    ]
 
     syntax_errors: list[str] = []
     for f in py_files:
         try:
-            _, stderr, exit_code = sandbox.exec(
-                f"python -c \"import ast; ast.parse(open('{f}').read())\"",
+            result = subprocess.run(
+                [subprocess.sys.executable, "-m", "py_compile", str(ws_path / f)],
+                capture_output=True,
+                text=True,
                 timeout=10,
             )
-            if exit_code != 0:
-                syntax_errors.append(f"{f}: {stderr.strip()[:200]}")
+            if result.returncode != 0:
+                syntax_errors.append(f"{f}: {result.stderr.strip()[:200]}")
         except Exception:
             pass
     if syntax_errors:
         artifacts.append("syntax errors: " + "; ".join(syntax_errors))
 
-    file_list = py_files
     key_contents: list[str] = []
     for f in py_files[:10]:
         fp = ws_path / f
         try:
-            key_contents.append(f"### {f}\n```\n{fp.read_text()[:3000]}\n```")
+            key_contents.append(
+                f"### {f}\n```\n{redact_secrets(fp.read_text())[:3000]}\n```"
+            )
         except Exception:
             pass
 
@@ -103,7 +102,9 @@ def tester(state: LoopState) -> dict:
     user_prompt = (
         f"## Acceptance Criteria\n{criteria_text}\n\n"
         f"## Test Output\n```\n{pytest_output[:5000]}\n```\n\n"
-        f"## All Files in Workspace\n" + "\n".join(f"- {f}" for f in all_files) + "\n\n"
+        f"## All Files in Workspace\n"
+        + "\n".join(f"- {f}" for f in all_files)
+        + "\n\n"
         + "\n\n".join(key_contents)
     )
 

@@ -9,10 +9,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from symbiot.providers import (
-    BUILTIN_PROVIDER_DEFINITIONS,
     ProviderDefinition,
     ProviderRegistry,
-    create_provider,
     mask_api_key,
     normalize_run_config,
     validate_api_key,
