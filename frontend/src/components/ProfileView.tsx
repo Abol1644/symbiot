@@ -1,76 +1,7 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 
 type Theme = "light" | "dark" | "system";
 type Density = "compact" | "comfortable";
-
-interface DockerStatus {
-  available: boolean;
-  version?: string;
-  message: string;
-}
-
-function DesktopRuntimePanel() {
-  const desktop = "__TAURI_INTERNALS__" in window;
-  const [docker, setDocker] = useState<DockerStatus | null>(null);
-  const [remoteEndpoint, setRemoteEndpoint] = useState("");
-  const [unsafeAcknowledged, setUnsafeAcknowledged] = useState(false);
-  const [message, setMessage] = useState("");
-
-  useEffect(() => {
-    if (!desktop) return;
-    const timer = window.setTimeout(() => {
-      void invoke<DockerStatus>("detect_docker")
-        .then(setDocker)
-        .catch(() => setMessage("Desktop runtime status is unavailable."));
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [desktop]);
-
-  if (!desktop) return null;
-
-  const startSandbox = async () => {
-    try {
-      const status = await invoke<DockerStatus>("ensure_sandbox");
-      setMessage(status.message);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Sandbox could not start.");
-    }
-  };
-
-  const configureRemote = async () => {
-    try {
-      const status = await invoke<{ message: string }>("configure_remote_sandbox", { endpoint: remoteEndpoint });
-      setMessage(status.message);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Remote sandbox was rejected.");
-    }
-  };
-
-  const enableUnsafe = async () => {
-    try {
-      await invoke("enable_unsafe_local_mode", { acknowledge: unsafeAcknowledged });
-      setMessage("Unsafe local mode acknowledged for this explicit session.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unsafe local mode remains disabled.");
-    }
-  };
-
-  return (
-    <div className="panel runtime-panel runtime-desktop">
-      <div className="panel-heading"><div><span className="eyebrow">Desktop runtime</span><h2>Sandbox availability</h2></div><span className={`connection-state ${docker?.available ? "connected" : "unconfigured"}`}><i />{docker?.available ? "ready" : "checking"}</span></div>
-      <div className="runtime-copy">{docker?.message ?? "Checking the local Docker daemon..."}</div>
-      <div className="runtime-actions"><button className="button button-small" disabled={!docker?.available} onClick={() => void startSandbox()}>Start local sandbox</button><span className="runtime-version">{docker?.version ?? ""}</span></div>
-      {!docker?.available && <>
-        <label htmlFor="remote-sandbox">Remote sandbox endpoint<input id="remote-sandbox" value={remoteEndpoint} placeholder="https://sandbox.example" onChange={event => setRemoteEndpoint(event.target.value)} /></label>
-        <button className="button button-secondary runtime-button" onClick={() => void configureRemote()}>Use remote sandbox</button>
-        <label className="toggle-row runtime-warning"><span><strong>Unsafe local mode</strong><small>Disabled by default. Only use with explicit acknowledgement.</small></span><input type="checkbox" checked={unsafeAcknowledged} onChange={event => setUnsafeAcknowledged(event.target.checked)} /></label>
-        <button className="button button-danger runtime-button" onClick={() => void enableUnsafe()}>Acknowledge unsafe mode</button>
-      </>}
-      {message && <div className="runtime-message" role="status">{message}</div>}
-    </div>
-  );
-}
 
 export function ProfileView() {
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("symbiot.theme") as Theme | null) ?? "dark");
@@ -102,7 +33,6 @@ export function ProfileView() {
           <div className="profile-callout"><span className="callout-mark">i</span><p>Provider keys are managed from the Providers surface and never appear in these preferences.</p></div>
         </div>
       </div>
-      <DesktopRuntimePanel />
     </section>
   );
 }

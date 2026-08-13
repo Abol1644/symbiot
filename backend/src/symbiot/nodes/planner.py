@@ -54,7 +54,7 @@ def planner(state: LoopState) -> dict:
         user_parts.append(f"## Existing Files in Workspace\n{lines}")
 
     if lessons:
-        user_parts.append("## Lessons Learned\n" + "\n".join(f"- {l}" for l in lessons))
+        user_parts.append("## Lessons Learned\n" + "\n".join(f"- {lesson}" for lesson in lessons))
     if test_report:
         user_parts.append(f"## Test Report\npassed: {test_report.passed}\nconfidence: {test_report.confidence}\nfailures: {test_report.failures}")
     if state.get("human_guidance"):

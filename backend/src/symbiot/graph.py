@@ -14,7 +14,7 @@ from symbiot.nodes.router import route_after_test, route_after_advance
 
 
 def advance(state: LoopState) -> dict:
-    from symbiot.sandbox.git_ops import commit_all
+    from symbiot.git_ops import commit_all
     milestone = state["milestones"][state["current"]]
     conf = state["test_report"].confidence
     commit_all(state["workspace"], f"milestone {milestone.id} passed (confidence {conf:.2f})")
@@ -31,11 +31,6 @@ def _failure(state: LoopState) -> dict:
 
 
 def _cleanup(state: LoopState) -> dict:
-    from symbiot.sandbox.docker_sandbox import Sandbox
-    ws = state.get("workspace")
-    if ws:
-        sandbox = Sandbox(ws)
-        sandbox.stop()
     if state.get("deploy_result") or state.get("deploy_approved") is False:
         return {"status": "passed"}
     return {}
@@ -93,7 +88,7 @@ def escalation(state: LoopState) -> dict:
 def deploy_gate(state: LoopState) -> dict:
     decision = interrupt({
         "kind": "deploy",
-        "question": f"All milestones passed. Deploy '{state['spec']['name']}' as Docker image?",
+        "question": f"All milestones passed. Accept the result for '{state['spec']['name']}'?",
         "options": ["deploy", "skip"],
     })
     return {"deploy_approved": "deploy" in decision.lower()}

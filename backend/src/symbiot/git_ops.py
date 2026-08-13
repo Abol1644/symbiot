@@ -28,7 +28,7 @@ def init_repo(path: str) -> None:
 
 def commit_all(path: str, message: str) -> str:
     _run(["git", "add", "-A"], path)
-    r = subprocess.run(
+    subprocess.run(
         ["git", "commit", "--allow-empty", "-m", message],
         cwd=path,
         capture_output=True,

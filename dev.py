@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent
 
 SERVICES: list[tuple[str, str, str]] = [
     ("graph",    "uv run langgraph dev",    str(ROOT / "backend")),
-    ("sidecar",  "uv run uvicorn symbiot.sidecar:app --port 8100 --reload", str(ROOT / "backend")),
+    ("sidecar",  "uv run uvicorn symbiot.sidecar:app --host 127.0.0.1 --port 8100 --reload", str(ROOT / "backend")),
     ("frontend", "npm run dev",             str(ROOT / "frontend")),
 ]
 
