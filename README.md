@@ -1,6 +1,15 @@
 # symbiot
 
-Multi-agent loop that turns a PROJECT.md spec into a tested, deployed project — fully autonomous, sandboxed, with human-in-the-loop gates and live streaming to a React visualizer.
+[![CI](https://github.com/Abol1644/symbiot/actions/workflows/ci.yml/badge.svg)](https://github.com/Abol1644/symbiot/actions/workflows/ci.yml)
+
+> **Localhost only.** Symbiot is designed as a local development tool — it binds
+> `127.0.0.1`, generates a per-launch API token, and SSRF-gates every outbound
+> provider call. Do **not** expose it to a public network without an
+> authentication proxy.
+
+Multi-agent loop that turns a PROJECT.md spec into a tested, deployed project —
+fully autonomous, sandboxed, with human-in-the-loop gates and live streaming to
+a React visualizer.
 
 ```
 PROJECT.md -> validator -> base -> planner -> programmer -> tester
@@ -31,6 +40,17 @@ PROJECT.md -> validator -> base -> planner -> programmer -> tester
                       cleanup -----------+
 
 ```
+
+## Highlights
+
+| Feature | Detail |
+|---------|--------|
+| Sandboxed execution | Every piece of generated code runs in an ephemeral, hardened Docker container (non-root, read-only rootfs, no network, PID/memory/CPU caps). |
+| Live streaming & HITL | SSE-pushed agent events reach a React dashboard; the human gates escalate failed milestones and the deploy decision. |
+| Safety model | Budget governor (token/call caps), run timeout, command allowlist, SSRF-gated provider URLs, path containment on every file operation. |
+| Desktop (Tauri) | The lightweight shell supervises the Python sidecar as a child process (auto-restart on crash, token via IPC) and proxies sandbox controls — zero Docker socket access from the shell. |
+| Provider-agnostic | Primary + fallback chain across OpenAI, Anthropic, Ollama, vLLM, and any OpenAI-compatible endpoint. Keys are encrypted at rest. |
+| Reproducible deploy | SYMBIOT_DEPLOY_MODE triggers a Docker build from the agent workspace; the image receives a smoke test. |
 
 ## Agent roles
 
@@ -173,3 +193,20 @@ no database, no web UI
 - Add authentication middleware (OAuth, API keys) to the LangGraph API.
 - Configure Docker resource limits on sandbox containers (memory, CPU).
 - The deployer builds on the **host** (not inside the sandbox) -- it's a trusted packaging step.
+
+## Testing
+
+```bash
+# Backend (unit + security)
+uv run --project backend pytest backend/tests -m "not real_provider"
+
+# E2E Compose (requires Docker daemon)
+SYMBIOT_E2E_TEST=1 uv run --project backend pytest backend/tests/test_e2e_compose.py
+
+# Real provider smoke test (uses live API — few cents per run)
+SYMBIOT_REAL_PROVIDER_TEST=1 SYMBIOT_TEST_API_KEY=sk-... \
+  uv run --project backend pytest backend/tests/test_real_provider.py -v -s
+
+# Frontend
+pnpm --dir frontend tsc -b && pnpm --dir frontend lint && pnpm --dir frontend test
+```
