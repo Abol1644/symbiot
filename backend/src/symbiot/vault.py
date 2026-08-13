@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Mapping
+from collections.abc import Mapping
 
 from cryptography.fernet import Fernet, InvalidToken
 
