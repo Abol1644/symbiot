@@ -166,6 +166,91 @@ const DEFAULT_RUN_CONFIG: RunConfig = {
   timeout_minutes: 30,
 };
 
+const HISTORY_KEY = "symbiot.run-history";
+
+interface RunHistoryEntry {
+  id: string;
+  createdAt: string;
+  projectName: string;
+  status: string;
+  specPreview: string; // first 200 chars, redacted
+  specHash: string; // SHA-256 of full content
+}
+
+function redactSpecPreview(spec: string): string {
+  return spec
+    .replace(/(api[_-]?key|secret|token|password)\s*[=:]\s*\S+/gi, "$1=<REDACTED>")
+    .replace(/(bearer|authorization)\s*[:=]\s*\S+/gi, "$1: <REDACTED>")
+    .replace(/sk-[a-z0-9]{20,}/gi, "<REDACTED_KEY>");
+}
+
+async function sha256(content: string): Promise<string> {
+  const data = new TextEncoder().encode(content);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest))
+    .map(byte => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function persistRunHistory(records: RunRecord[]): Promise<void> {
+  const entries = await Promise.all(records.map(async (record): Promise<RunHistoryEntry> => ({
+    id: record.id,
+    createdAt: new Date(record.startedAt).toISOString(),
+    projectName: record.projectName,
+    status: record.status,
+    specPreview: redactSpecPreview(record.spec).slice(0, 200),
+    specHash: await sha256(record.spec),
+  })));
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(entries));
+}
+
+function isRunHistoryEntry(value: unknown): value is RunHistoryEntry {
+  if (typeof value !== "object" || value === null) return false;
+  const entry = value as Record<string, unknown>;
+  return typeof entry.id === "string" && typeof entry.projectName === "string";
+}
+
+function toRunRecord(entry: RunHistoryEntry): RunRecord {
+  const createdAt = Date.parse(entry.createdAt) || 0;
+  return {
+    id: entry.id,
+    threadId: null,
+    startedAt: createdAt,
+    endedAt: createdAt,
+    status: entry.status as RunStatus,
+    projectName: entry.projectName,
+    spec: "",
+    runConfig: DEFAULT_RUN_CONFIG,
+    budget: null,
+    logs: [],
+    terminal: [],
+  };
+}
+
+function readHistory(): RunRecord[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      localStorage.removeItem(HISTORY_KEY);
+      return [];
+    }
+    // Migration: entries from before the secret boundary stored the raw
+    // PROJECT.md; drop them so no spec content survives in localStorage.
+    if (parsed.some(item => typeof (item as { spec?: unknown })?.spec === "string")) {
+      localStorage.removeItem(HISTORY_KEY);
+      return [];
+    }
+    return parsed
+      .filter(isRunHistoryEntry)
+      .map(toRunRecord)
+      .slice(0, 30);
+  } catch {
+    return [];
+  }
+}
+
 interface UseLangGraphStream {
   status: RunStatus;
   activeNode: string | null;
@@ -184,17 +269,6 @@ interface UseLangGraphStream {
   startRun: (projectMd: string, sourcePath?: string, runConfig?: RunConfig) => Promise<void>;
   resumeInterrupt: (choice: string | { action: string; guidance?: string }) => Promise<void>;
   reset: () => void;
-}
-
-function readHistory(): RunRecord[] {
-  try {
-    const raw = localStorage.getItem("symbiot.run-history");
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as RunRecord[];
-    return Array.isArray(parsed) ? parsed.slice(0, 30) : [];
-  } catch {
-    return [];
-  }
 }
 
 function projectName(spec: string): string {
@@ -341,7 +415,7 @@ export function useLangGraphStream(): UseLangGraphStream {
     };
     setHistory(previous => {
       const next = [record, ...previous.filter(item => item.id !== runId)].slice(0, 30);
-      localStorage.setItem("symbiot.run-history", JSON.stringify(next));
+      void persistRunHistory(next);
       return next;
     });
   }, [accumState, logs, runId, status, terminal, threadId]);

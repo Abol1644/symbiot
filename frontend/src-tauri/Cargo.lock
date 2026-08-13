@@ -3120,6 +3120,7 @@ name = "symbiot-desktop"
 version = "2.0.0"
 dependencies = [
  "keyring",
+ "libc",
  "serde",
  "serde_json",
  "tauri",

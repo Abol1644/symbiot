@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { fetchToken } from "./api/auth";
+import { sidecar } from "./api/sidecar";
 import { CommandPalette, type PaletteAction } from "./components/CommandPalette";
 import { EscalationCenter } from "./components/EscalationCenter";
 import { HistoryView } from "./components/HistoryView";
@@ -60,6 +62,12 @@ export default function App() {
   const budget = useMemo(() => budgetFromState(stream.state), [stream.state]);
 
   useEffect(() => {
+    void fetchToken().catch(() => {
+      // token is fetched lazily by API calls; mount-time fetch just warms it
+    });
+  }, []);
+
+  useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -75,11 +83,20 @@ export default function App() {
     void stream.startRun(spec, undefined, runConfig);
   }, [runConfig, spec, stream]);
 
-  const rerun = useCallback((record: RunRecord) => {
-    setSpec(record.spec);
-    setRunConfig(record.runConfig);
+  const rerun = useCallback(async (record: RunRecord) => {
+    let specText = record.spec;
+    if (!specText) {
+      try {
+        specText = await sidecar.getSpec(record.projectName);
+      } catch {
+        specText = "";
+      }
+    }
+    const nextSpec = specText || DEFAULT_SPEC;
+    setSpec(nextSpec);
+    setRunConfig(record.runConfig ?? DEFAULT_RUN_CONFIG);
     setScreen("console");
-    void stream.startRun(record.spec, undefined, record.runConfig);
+    void stream.startRun(nextSpec, undefined, record.runConfig);
   }, [stream]);
 
   const paletteActions = useMemo<PaletteAction[]>(() => [
@@ -98,7 +115,6 @@ export default function App() {
         <nav className="main-nav" aria-label="Main navigation">
           {NAV_ITEMS.map(item => <button key={item.id} className={`nav-item ${screen === item.id ? "active" : ""}`} onClick={() => navigate(item.id)}><span className="nav-icon">{item.icon}</span><span>{item.label}</span>{item.id === "escalation" && stream.interruptPayload && <i className="nav-alert" />}</button>)}
         </nav>
-        <div className="sidebar-bottom"><button className="palette-trigger" onClick={() => setPaletteOpen(true)}><span>⌘</span><span>Command palette</span><kbd>K</kbd></button><div className="sandbox-badge"><i /> sandbox enforced<span>30:00 max run</span></div></div>
       </aside>
       <div className="app-main">
         <header className="topbar"><div className="breadcrumb"><span>SYMBIOT /</span><strong>{NAV_ITEMS.find(item => item.id === displayedScreen)?.label}</strong></div><div className="topbar-right"><span className={`top-status top-${stream.status}`}><i /> {statusLabel(stream.status)}</span>{stream.threadId && <span className="thread-chip">{stream.threadId.slice(0, 10)}</span>}<button className="top-avatar" onClick={() => navigate("profile")} aria-label="AB">AB</button></div></header>

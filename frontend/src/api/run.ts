@@ -1,6 +1,8 @@
 import type { RunConfig } from "../types";
+import { authHeaders } from "./auth";
+import { SIDECAR_ORIGIN } from "./base";
 
-const BASE = (import.meta.env.VITE_RUN_API_URL ?? "/api").replace(/\/$/, "");
+const BASE = (import.meta.env.VITE_RUN_API_URL ?? `${SIDECAR_ORIGIN}/api`).replace(/\/$/, "");
 
 export interface RunStartInput {
   raw_spec: string;
@@ -32,7 +34,7 @@ async function readJson<T>(response: Response): Promise<T> {
 export async function createRun(input: RunStartInput): Promise<RunStartResponse> {
   const response = await fetch(`${BASE}/runs`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: await authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(input),
   });
   return readJson<RunStartResponse>(response);
@@ -41,15 +43,15 @@ export async function createRun(input: RunStartInput): Promise<RunStartResponse>
 export async function resumeRun(runId: string, decision: string | { action: string; guidance?: string }): Promise<ResumeResponse> {
   const response = await fetch(`${BASE}/runs/${encodeURIComponent(runId)}/resume`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: await authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ decision }),
   });
   return readJson<ResumeResponse>(response);
 }
 
-export async function* streamRun(runId: string, after = 0): AsyncGenerator<StreamEvent> {
-  const response = await fetch(`${BASE}/runs/${encodeURIComponent(runId)}/events?after=${after}`, {
-    headers: { Accept: "text/event-stream" },
+export async function* streamRun(runId: string, afterId = 0): AsyncGenerator<StreamEvent> {
+  const response = await fetch(`${BASE}/runs/${encodeURIComponent(runId)}/events?after_id=${afterId}`, {
+    headers: await authHeaders({ Accept: "text/event-stream" }),
   });
   if (!response.ok || !response.body) throw new Error(`run event stream returned ${response.status}`);
   const reader = response.body.getReader();

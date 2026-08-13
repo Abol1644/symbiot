@@ -24,22 +24,24 @@ export interface GitStatusEntry {
 }
 
 import type { ModelSelection, ProviderInfo, RunConfig } from "../types";
+import { authHeaders } from "./auth";
+import { SIDECAR_ORIGIN, isDesktop } from "./base";
 
 export interface FileTreeEntry {
   path: string;
   size: number;
 }
 
-const BASE = import.meta.env.DEV ? "/fs" : "";
+const BASE = isDesktop ? SIDECAR_ORIGIN : import.meta.env.DEV ? "/fs" : "";
 
 async function get<T>(url: string): Promise<T> {
-  const r = await fetch(`${BASE}${url}`);
+  const r = await fetch(`${BASE}${url}`, { headers: await authHeaders() });
   if (!r.ok) throw new Error(`${r.status}: ${r.statusText}`);
   return r.json() as Promise<T>;
 }
 
 async function getText(url: string): Promise<string> {
-  const r = await fetch(`${BASE}${url}`);
+  const r = await fetch(`${BASE}${url}`, { headers: await authHeaders() });
   if (!r.ok) throw new Error(`${r.status}: ${r.statusText}`);
   return r.text();
 }
@@ -47,7 +49,7 @@ async function getText(url: string): Promise<string> {
 async function post<T>(url: string, body: unknown): Promise<T> {
   const r = await fetch(`${BASE}${url}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: await authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error(`${r.status}: ${r.statusText}`);
