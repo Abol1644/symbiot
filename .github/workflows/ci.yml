@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.7"
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Sync dependencies
+        run: uv sync --project backend --frozen
+      - name: Lint (ruff)
+        run: uv run --project backend ruff check backend/src backend/tests
+      - name: Unit tests
+        run: >
+          uv run --project backend pytest backend/tests -q
+          -m "not real_provider"
+          --ignore=backend/tests/test_e2e_compose.py
+
+  frontend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install
+        run: corepack enable && pnpm install --frozen-lockfile
+        working-directory: frontend
+      - name: Lint
+        run: pnpm lint
+        working-directory: frontend
+      - name: Test
+        run: pnpm test
+        working-directory: frontend
+      - name: Build
+        run: pnpm build
+        working-directory: frontend
+
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with: { version: "0.7", enable-cache: true }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: pip-audit
+        run: |
+          uv export --project backend --no-dev --format requirements-txt -o /tmp/req.txt
+          uvx pip-audit -r /tmp/req.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: pnpm audit
+        run: pnpm audit --dir frontend
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+        working-directory: frontend/src-tauri
