@@ -12,8 +12,6 @@ from symbiot.providers import (
     GenericOpenAICompatibleProvider,
     ModelInfo,
     OpenAIProvider,
-    OpenCodeAIProvider,
-    OpenRouterProvider,
     Provider,
     ProviderChainError,
     ProviderError,

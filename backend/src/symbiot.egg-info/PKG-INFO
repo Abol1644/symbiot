@@ -10,5 +10,9 @@ Requires-Dist: langsmith
 Requires-Dist: pydantic-settings
 Requires-Dist: docker
 Requires-Dist: fastapi
+Requires-Dist: httpx
+Requires-Dist: cryptography>=42
+Requires-Dist: keyring>=25
 Requires-Dist: uvicorn
 Requires-Dist: langgraph-checkpoint-sqlite>=3.1.1
+Requires-Dist: aiosqlite
