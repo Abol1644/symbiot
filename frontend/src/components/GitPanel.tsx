@@ -59,6 +59,8 @@ export function GitPanel({ workspaceName, onRefreshFileTree }: GitPanelProps) {
       await sidecar.gitRollback(workspaceName, hash);
       await fetchData();
       onRefreshFileTree();
+    } catch {
+      // errors are surfaced by leaving the panel in place; never reject unhandled
     } finally {
       setRollbackHash(null);
       setHoldProgress(0);
@@ -66,6 +68,11 @@ export function GitPanel({ workspaceName, onRefreshFileTree }: GitPanelProps) {
   }, [workspaceName, fetchData, onRefreshFileTree]);
 
   const holdTimerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+  const doRollbackRef = useRef(doRollback);
+  useEffect(() => {
+    doRollbackRef.current = doRollback;
+  });
+
   useEffect(() => {
     if (!rollbackHash) {
       if (holdTimerRef.current) {
@@ -74,23 +81,21 @@ export function GitPanel({ workspaceName, onRefreshFileTree }: GitPanelProps) {
       }
       return;
     }
+    const target = rollbackHash;
+    let progress = 0;
     holdTimerRef.current = setInterval(() => {
-      setHoldProgress(prev => {
-        if (prev >= 100) {
-          if (holdTimerRef.current) clearInterval(holdTimerRef.current);
-          return 100;
+      progress += 5;
+      setHoldProgress(Math.min(100, progress));
+      if (progress >= 100) {
+        if (holdTimerRef.current) {
+          clearInterval(holdTimerRef.current);
+          holdTimerRef.current = undefined;
         }
-        return prev + 5;
-      });
+        void doRollbackRef.current(target);
+      }
     }, 50);
     return () => { if (holdTimerRef.current) clearInterval(holdTimerRef.current); };
   }, [rollbackHash]);
-
-  useEffect(() => {
-    if (holdProgress >= 100 && rollbackHash) {
-      doRollback(rollbackHash);
-    }
-  }, [holdProgress, rollbackHash, doRollback]);
 
   const loadDiff = async (hash: string) => {
     if (expanded === hash) {

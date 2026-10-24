@@ -11,7 +11,8 @@ function formatDate(timestamp: number): string {
 }
 
 export function HistoryView({ records, onRerun }: HistoryViewProps) {
-  const [selected, setSelected] = useState<RunRecord | null>(records[0] ?? null);
+  const [selectedId, setSelectedId] = useState<string | null>(records[0]?.id ?? null);
+  const selected = records.find(record => record.id === selectedId) ?? records[0] ?? null;
   return (
     <section className="screen history-screen" aria-labelledby="history-title">
       <div className="screen-heading"><div><span className="eyebrow">Archive / evidence</span><h1 id="history-title">Run history</h1><p>Every mission leaves behind its route, burn, output, and decision trail.</p></div><span className="count-badge">{records.length} missions</span></div>
@@ -20,7 +21,7 @@ export function HistoryView({ records, onRerun }: HistoryViewProps) {
           <div className="panel-heading"><div><span className="eyebrow">Recent missions</span><h2>Flight log</h2></div></div>
           {records.length === 0 && <div className="empty-inline">No completed missions yet. Start from the console.</div>}
           {records.map(record => (
-            <button className={`history-row ${selected?.id === record.id ? "selected" : ""}`} key={record.id} onClick={() => setSelected(record)}>
+            <button className={`history-row ${selected?.id === record.id ? "selected" : ""}`} key={record.id} onClick={() => setSelectedId(record.id)}>
               <span className={`history-status status-${record.status}`} />
               <span className="history-main"><strong>{record.projectName}</strong><small>{record.runConfig.primary.provider} / {record.runConfig.primary.model}</small></span>
               <span className="history-meta"><strong>{record.status}</strong><small>{formatDate(record.endedAt)}</small></span>

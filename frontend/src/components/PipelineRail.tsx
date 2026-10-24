@@ -2,9 +2,9 @@ import type { NodeResult, RunStatus } from "../types";
 
 const AGENTS = [
   { id: "validator", label: "Validator", detail: "spec integrity" },
-  { id: "base", label: "Base", detail: "workspace + sandbox" },
+  { id: "base", label: "Base", detail: "workspace + git seed" },
   { id: "planner", label: "Planner", detail: "milestone plan" },
-  { id: "programmer", label: "Programmer", detail: "changes in Docker" },
+  { id: "programmer", label: "Programmer", detail: "native execution" },
   { id: "tester", label: "Tester", detail: "proof + confidence" },
   { id: "deployer", label: "Deployer", detail: "approved artifact" },
 ] as const;

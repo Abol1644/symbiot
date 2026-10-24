@@ -5,7 +5,7 @@ type Density = "compact" | "comfortable";
 
 export function ProfileView() {
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("symbiot.theme") as Theme | null) ?? "dark");
-  const [accent, setAccent] = useState(() => localStorage.getItem("symbiot.accent") ?? "#e8a85c");
+  const [accent, setAccent] = useState(() => localStorage.getItem("symbiot.accent") ?? "#8b5cf6");
   const [density, setDensity] = useState<Density>(() => (localStorage.getItem("symbiot.density") as Density | null) ?? "comfortable");
   const [notifications, setNotifications] = useState(() => localStorage.getItem("symbiot.notifications") !== "off");
 
@@ -25,7 +25,7 @@ export function ProfileView() {
       <div className="profile-grid">
         <div className="panel preference-card"><div className="panel-heading"><div><span className="eyebrow">Atmosphere</span><h2>Display system</h2></div></div>
           <label htmlFor="profile-theme">Theme<select id="profile-theme" value={theme} onChange={event => setTheme(event.target.value as Theme)}><option value="dark">Dark command</option><option value="light">Light command</option><option value="system">System</option></select></label>
-          <label>Accent color<div className="accent-options">{["#e8a85c", "#73c7b8", "#9a8cff", "#e67d91"].map(color => <button aria-label={`Set accent ${color}`} className={`accent-swatch ${accent === color ? "selected" : ""}`} style={{ backgroundColor: color }} key={color} onClick={() => setAccent(color)} />)}</div></label>
+          <label>Accent color<div className="accent-options">{["#8b5cf6", "#6366f1", "#00f5d4", "#f43f5e"].map(color => <button aria-label={`Set accent ${color}`} className={`accent-swatch ${accent === color ? "selected" : ""}`} style={{ backgroundColor: color }} key={color} onClick={() => setAccent(color)} />)}</div></label>
           <label htmlFor="profile-density">Density<select id="profile-density" value={density} onChange={event => setDensity(event.target.value as Density)}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
         </div>
         <div className="panel preference-card"><div className="panel-heading"><div><span className="eyebrow">Signals</span><h2>Notifications</h2></div></div>

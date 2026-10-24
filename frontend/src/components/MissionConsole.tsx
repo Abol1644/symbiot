@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { GraphCanvas } from "./GraphCanvas";
 import { PipelineRail } from "./PipelineRail";
 import { TerminalPanel } from "./TerminalPanel";
 import { budgetPercent, missionName } from "../lib/mission";
@@ -64,7 +65,7 @@ export function MissionConsole(props: MissionConsoleProps) {
   return (
     <section className="screen console-screen" aria-labelledby="console-title">
       <div className="mission-intro">
-        <div><span className="eyebrow">Run console / live factory</span><h1 id="console-title">Build something that survives contact.</h1><p>Drop a PROJECT.md into the factory. Watch every agent earn its next state.</p></div>
+        <div><span className="eyebrow">Run console / hive-mind factory</span><h1 id="console-title">Feed the hive a mission.</h1><p>Drop a PROJECT.md into the pit. Watch every agent earn its next state.</p></div>
         <div className="mission-actions"><span className="mission-name"><i /> {name}</span><button className="button button-primary button-run" disabled={isRunning} onClick={props.onRun}>{isRunning ? "Factory running" : "Launch mission"}<kbd>{isRunning ? "live" : "⌘↵"}</kbd></button></div>
       </div>
       {props.connectionError && <div className="notice notice-danger">Run service unreachable. Start the backend stream and retry.</div>}
@@ -77,6 +78,21 @@ export function MissionConsole(props: MissionConsoleProps) {
             <div className="spec-footer"><span><i className="status-light" /> spec loaded</span><span>{props.spec.split("\n").length} lines · {props.spec.length.toLocaleString()} chars</span></div>
           </section>
           <PipelineRail activeNode={props.activeNode} completedNodes={props.completedNodes} liveStatus={props.liveStatus} runStatus={props.status} />
+          <section className="panel hive-panel" aria-labelledby="hive-title">
+            <div className="panel-heading">
+              <div><span className="eyebrow">Living system / neural mesh</span><h2 id="hive-title">Hive graph</h2></div>
+              <span className="live-indicator"><span /> {props.activeNode ?? "dormant"}</span>
+            </div>
+            <div className="hive-graph">
+              <GraphCanvas activeNode={props.activeNode} completedNodes={props.completedNodes} status={props.status} liveStatus={props.liveStatus} />
+            </div>
+            <div className="graph-legend" aria-label="Hive graph legend">
+              <span><i className="legend-dot dot-running" /> bonded</span>
+              <span><i className="legend-dot dot-pass" /> verified</span>
+              <span><i className="legend-dot dot-fail" /> severed</span>
+              <span><i className="legend-dot dot-escalated" /> human gate</span>
+            </div>
+          </section>
           <TerminalPanel entries={props.terminal} />
         </div>
         <aside className="console-side">
@@ -87,7 +103,7 @@ export function MissionConsole(props: MissionConsoleProps) {
           </section>
           <BudgetMeter budget={props.budget} />
           <ActivityPanel activity={props.activity} />
-          <section className="panel workspace-panel"><div className="panel-heading"><div><span className="eyebrow">Sandbox workspace</span><h2>Artifact surface</h2></div><span className="count-badge">{props.fileTree.length}</span></div><div className="workspace-summary"><strong>{props.fileTree.filter(file => file.status === "created").length}</strong><span>new files</span><strong>{props.fileTree.filter(file => file.status === "modified").length}</strong><span>modified</span></div><div className="workspace-path">All generated code executes inside the Docker runner.</div></section>
+          <section className="panel workspace-panel"><div className="panel-heading"><div><span className="eyebrow">Hive workspace</span><h2>Artifact surface</h2></div><span className="count-badge">{props.fileTree.length}</span></div><div className="workspace-summary"><strong>{props.fileTree.filter(file => file.status === "created").length}</strong><span>new files</span><strong>{props.fileTree.filter(file => file.status === "modified").length}</strong><span>modified</span></div><div className="workspace-path">All generated code executes natively inside the mission workspace.</div></section>
         </aside>
       </div>
     </section>

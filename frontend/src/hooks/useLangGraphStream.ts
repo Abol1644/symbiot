@@ -28,9 +28,9 @@ function summarizeNodeOutput(node: string, data: Record<string, unknown>): strin
   }
   if (node === "escalation") return "human decision required";
   if (node === "validator") return data.status === "rejected" ? "spec rejected" : "spec validated";
-  if (node === "base") return "sandbox workspace initialized";
+  if (node === "base") return "hive workspace initialized";
   if (node === "advance") return "milestone complete";
-  if (node === "cleanup") return "sandbox stopped";
+  if (node === "cleanup") return "run torn down";
   return JSON.stringify(data).slice(0, 100);
 }
 
@@ -411,7 +411,7 @@ export function useLangGraphStream(): UseLangGraphStream {
       budget,
       logs,
       terminal,
-      artifact: typeof accumState?.deploy_result === "object" ? "Docker image produced" : undefined,
+      artifact: typeof accumState?.deploy_result === "object" ? "Native package staged" : undefined,
     };
     setHistory(previous => {
       const next = [record, ...previous.filter(item => item.id !== runId)].slice(0, 30);

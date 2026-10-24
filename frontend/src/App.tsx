@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchToken } from "./api/auth";
 import { sidecar } from "./api/sidecar";
 import { CommandPalette, type PaletteAction } from "./components/CommandPalette";
 import { EscalationCenter } from "./components/EscalationCenter";
@@ -8,6 +7,7 @@ import { MissionConsole } from "./components/MissionConsole";
 import { ProfileView } from "./components/ProfileView";
 import { ProvidersView } from "./components/ProvidersView";
 import { useLangGraphStream } from "./hooks/useLangGraphStream";
+import { SymbioteCrest } from "./components/SymbioteCrest";
 import { budgetFromState } from "./lib/mission";
 import type { RunConfig, RunRecord, ScreenId } from "./types";
 
@@ -40,11 +40,11 @@ const DEFAULT_RUN_CONFIG: RunConfig = {
 };
 
 const NAV_ITEMS: { id: ScreenId; label: string; icon: string; shortcut: string }[] = [
-  { id: "console", label: "Run console", icon: "01", shortcut: "G" },
+  { id: "console", label: "Run console", icon: "◈", shortcut: "G" },
   { id: "escalation", label: "Escalation center", icon: "!", shortcut: "E" },
-  { id: "providers", label: "Providers", icon: "02", shortcut: "P" },
-  { id: "history", label: "Run history", icon: "03", shortcut: "H" },
-  { id: "profile", label: "Profile", icon: "04", shortcut: "O" },
+  { id: "providers", label: "Providers", icon: "⬡", shortcut: "P" },
+  { id: "history", label: "Run history", icon: "▤", shortcut: "H" },
+  { id: "profile", label: "Profile", icon: "◉", shortcut: "O" },
 ];
 
 function statusLabel(status: string): string {
@@ -60,12 +60,6 @@ export default function App() {
 
   const navigate = useCallback((next: ScreenId) => setScreen(next), []);
   const budget = useMemo(() => budgetFromState(stream.state), [stream.state]);
-
-  useEffect(() => {
-    void fetchToken().catch(() => {
-      // token is fetched lazily by API calls; mount-time fetch just warms it
-    });
-  }, []);
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
@@ -110,7 +104,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className="app-sidebar">
-        <div className="brand-lockup"><span className="brand-mark">S</span><span><strong>symbiot</strong><small>agent factory / v2</small></span></div>
+        <div className="brand-lockup"><span className="brand-mark"><SymbioteCrest /></span><span><strong>symbiot</strong><small>hive-mind mission control</small></span></div>
         <div className="sidebar-label">Command deck</div>
         <nav className="main-nav" aria-label="Main navigation">
           {NAV_ITEMS.map(item => <button key={item.id} className={`nav-item ${screen === item.id ? "active" : ""}`} onClick={() => navigate(item.id)}><span className="nav-icon">{item.icon}</span><span>{item.label}</span>{item.id === "escalation" && stream.interruptPayload && <i className="nav-alert" />}</button>)}

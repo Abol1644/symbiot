@@ -337,7 +337,7 @@ def workspace_tree(name: str) -> list[dict]:
 def workspace_file(name: str, path: str = "") -> str:
     ws = _safe(workspace_root(), name)
     fp = _safe(ws, path)
-    if not fp.exists():
+    if not fp.is_file():
         raise HTTPException(404, "File not found")
     if _is_binary(fp):
         raise HTTPException(400, "Binary file")
