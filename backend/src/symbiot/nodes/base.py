@@ -6,6 +6,7 @@ from pathlib import Path
 
 from langgraph.config import get_stream_writer
 
+from symbiot.config import get_workspace_root
 from symbiot.git_ops import init_repo, commit_all, file_tree
 from symbiot.state import LoopState
 
@@ -44,7 +45,7 @@ def base(state: LoopState) -> dict:
     spec = dict(state.get("spec") or {})
     spec_name = sanitize_project_name(spec.get("name", "project"))
     spec["name"] = spec_name
-    ws_root = Path.home() / ".symbiot" / "workspace"
+    ws_root = get_workspace_root()
     workspace = ws_root / spec_name
 
     if workspace.exists():

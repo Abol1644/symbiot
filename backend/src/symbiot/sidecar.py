@@ -11,6 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from symbiot.config import get_workspace_root
 from symbiot.provider_store import ProviderManager, ProviderStoreError
 from symbiot.redaction import redact_provider_config
 from symbiot.run_manager import RunManager
@@ -20,7 +21,20 @@ from symbiot.schemas import ModelSelection
 logger = logging.getLogger("symbiot.sidecar")
 
 PROJECTS_ROOT = Path(__file__).resolve().parents[3] / "projects"
-WORKSPACE_ROOT = Path(__file__).resolve().parents[3] / "backend" / "workspace"
+
+
+def workspace_root() -> Path:
+    """Resolve the workspace root via the shared backend setting.
+
+    Reads ``Settings`` on every call so ``SYMBIOT_WORKSPACE_ROOT`` overrides
+    take effect without reimporting this module.
+    """
+
+    return get_workspace_root()
+
+
+# Backwards-compatible alias for the pre-refactor module constant.
+WORKSPACE_ROOT = get_workspace_root()
 
 API_TOKEN = secrets.token_urlsafe(32)
 logger.warning("Symbiot sidecar API token: %s", API_TOKEN)
@@ -302,7 +316,7 @@ def browse(path: str = "") -> dict[str, Any]:
 
 @app.get("/workspace/{name}/tree", dependencies=[Depends(require_auth)])
 def workspace_tree(name: str) -> list[dict]:
-    ws = _safe(WORKSPACE_ROOT, name)
+    ws = _safe(workspace_root(), name)
     if not ws.exists():
         raise HTTPException(404, "Workspace not found")
 
@@ -321,7 +335,7 @@ def workspace_tree(name: str) -> list[dict]:
 
 @app.get("/workspace/{name}/file", dependencies=[Depends(require_auth)])
 def workspace_file(name: str, path: str = "") -> str:
-    ws = _safe(WORKSPACE_ROOT, name)
+    ws = _safe(workspace_root(), name)
     fp = _safe(ws, path)
     if not fp.exists():
         raise HTTPException(404, "File not found")
@@ -332,7 +346,7 @@ def workspace_file(name: str, path: str = "") -> str:
 
 @app.get("/workspace/{name}/git/log", dependencies=[Depends(require_auth)])
 def git_log(name: str) -> list[dict]:
-    ws = _safe(WORKSPACE_ROOT, name)
+    ws = _safe(workspace_root(), name)
     try:
         out = subprocess.run(
             ["git", "log", "--pretty=format:%H|%h|%s|%cI"],
@@ -359,7 +373,7 @@ def git_log(name: str) -> list[dict]:
 
 @app.get("/workspace/{name}/git/diff", dependencies=[Depends(require_auth)])
 def git_diff(name: str, commit: str = "") -> str:
-    ws = _safe(WORKSPACE_ROOT, name)
+    ws = _safe(workspace_root(), name)
     try:
         out = subprocess.run(
             ["git", "show", commit, "--patch", "--color=never"],
@@ -374,7 +388,7 @@ def git_diff(name: str, commit: str = "") -> str:
 
 @app.get("/workspace/{name}/git/status", dependencies=[Depends(require_auth)])
 def git_status(name: str) -> list[dict]:
-    ws = _safe(WORKSPACE_ROOT, name)
+    ws = _safe(workspace_root(), name)
     try:
         out = subprocess.run(
             ["git", "status", "--porcelain"],
@@ -396,7 +410,7 @@ def git_status(name: str) -> list[dict]:
 
 @app.post("/workspace/{name}/git/rollback", dependencies=[Depends(require_auth)])
 def git_rollback_endpoint(name: str, body: dict[str, str]) -> list[dict]:
-    ws = _safe(WORKSPACE_ROOT, name)
+    ws = _safe(workspace_root(), name)
     commit = body.get("commit", "")
     if not commit:
         raise HTTPException(400, "commit is required")

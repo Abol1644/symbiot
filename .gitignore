@@ -3,6 +3,10 @@
 /backend/.langgraph_api
 __pycache__/
 *.pyc
+*.db
+*.db-shm
+*.db-wal
+*.egg-info/
 /.codedev-mcp
 /.playwright-mcp
 /frontend/src-tauri/target

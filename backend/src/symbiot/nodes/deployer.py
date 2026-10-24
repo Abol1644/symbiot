@@ -13,13 +13,13 @@ def _writer():
 
 def deployer(state: LoopState) -> dict:
     writer = _writer()
-    writer({"agent": "deployer", "msg": "Deploy is disabled — Docker is not used."})
+    writer({"agent": "deployer", "msg": "Deploy step is disabled — native execution mode."})
     return {
         "deploy_result": DeployResult(
             image="",
             tag="",
             smoke_test_passed=False,
-            smoke_test_output="docker deployment has been removed from symbiot",
+            smoke_test_output="deployer is disabled in native execution mode",
         ).model_dump(),
         "status": "passed",
     }

@@ -9,7 +9,6 @@ dependencies = [
     "langchain-ollama",
     "langsmith",
     "pydantic-settings",
-    "docker",
     "fastapi",
     "httpx",
     "cryptography>=42",

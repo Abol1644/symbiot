@@ -284,7 +284,6 @@ class RunManager:
         self.update_run_status(run_id, "cancelling")
         session = self.get(run_id)
         if session is None or not session.executing:
-            self._cleanup_sandbox(session)
             self.update_run_status(run_id, "cancelled")
             if session is not None:
                 with session.lock:
@@ -304,9 +303,6 @@ class RunManager:
     def _raise_if_cancelled(self, run_id: str) -> None:
         if self.check_cancelled(run_id):
             raise RunCancelled(run_id)
-
-    def _cleanup_sandbox(self, session: RunSession | None) -> None:
-        pass
 
     # -------------------------------------------------------------- events
 
@@ -556,7 +552,6 @@ class RunManager:
             session.close("done")
             self.update_run_status(session.run_id, "done")
         except RunCancelled:
-            self._cleanup_sandbox(session)
             self.publish(session, "status", {"status": "cancelled"})
             session.close("cancelled")
             self.update_run_status(session.run_id, "cancelled")

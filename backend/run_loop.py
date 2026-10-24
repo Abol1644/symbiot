@@ -45,7 +45,7 @@ def main():
     git_dir = Path(result.get("workspace", "")) / ".git"
     if git_dir.exists():
         print("git repo: yes")
-        from symbiot.sandbox.git_ops import get_log
+        from symbiot.git_ops import get_log
         log = get_log(str(git_dir.parent))
         print("commits:", log)
 
